@@ -11,7 +11,7 @@ Dépendances système (Arch) : `mpv`, `pipewire` (pour `pw-record`), `webkit2gtk
 ```fish
 npm install
 npm run tauri dev      # application de bureau, vrai moteur audio
-npm run dev            # navigateur seul, données factices (mock)
+# (npm run dev seul ne sert à rien : le moteur tourne dans la fenêtre Tauri)
 npm run tauri build    # paquets .deb / .rpm / AppImage
 ```
 
@@ -38,8 +38,8 @@ paramètres mais pas encore appliqué par le moteur.
 ## Pile technique
 
 React 19 · TypeScript (strict) · Vite · Tailwind CSS v4 · Framer Motion ·
-Zustand · lucide-react · @tanstack/react-virtual. Aucune requête réseau réelle,
-aucun élément `<audio>` dans les composants.
+Zustand · lucide-react · @tanstack/react-virtual. Aucun élément `<audio>` dans les
+composants : tout le son passe par mpv.
 
 ## Le contrat `MusicBackend`
 
@@ -49,16 +49,10 @@ Tout l'accès aux données passe par l'interface `MusicBackend`
 `settings`, `system`. Chaque méthode `on*` renvoie une fonction de
 désabonnement.
 
-- `src/services/mockBackend.ts` — implémentation en mémoire complète :
-  ~300 titres, 30 albums, 15 artistes, 8 playlists, 6 radios, paroles
-  synchronisées, simulation de lecture (tick de position toutes les 250 ms,
-  enchaînement automatique, respect de `shuffle`/`repeat`), flux d'analyseur
-  animé et latence artificielle pour exercer les états de chargement.
 - `src/services/index.ts` — **seul endroit** où le backend concret est
   référencé :
 
-  il choisit `tauriBackend` dans l'application de bureau et `mockBackend`
-  dans un simple navigateur.
+  il branche `tauriBackend` (le moteur Rust).
 - `src/services/tauriBackend.ts` — implémentation réelle : appels `invoke`
   vers Rust et index de la bibliothèque en mémoire (recherche, tris et
   agrégations albums/artistes instantanés).
@@ -72,7 +66,7 @@ stores (`src/store/`) appellent `backend` et s'abonnent à ses événements.
 ```
 src/
   types.ts              Types du domaine (Track, Album, PlayerState, Settings…)
-  services/             Contrat backend + mock + point d'injection unique
+  services/             Contrat backend + implémentation Tauri + point d'injection
   store/                Stores Zustand (player, library, ui, settings, playlists)
   hooks/                useKeyboardShortcuts, useDynamicColor, usePlaybackActions
   components/           Composants réutilisables (CoverArt, TrackRow, cartes,

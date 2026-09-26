@@ -1,5 +1,5 @@
 // Domain types for Aura. The single source of truth shared across the
-// backend contract, the mock implementation and the Zustand stores.
+// backend contract, the Tauri implementation and the Zustand stores.
 
 export type Codec = "FLAC" | "MP3" | "OPUS" | "AAC" | "ALAC" | "VORBIS" | "WAV" | "AIFF" | "WAVPACK" | "APE" | "MPC" | "AUDIO"
 export type AudioQuality = "Hi-Res" | "Lossless" | "Lossy"

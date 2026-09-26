@@ -72,7 +72,7 @@ export default function App() {
     loadFavorites()
   }, [])
 
-  // Real window resize / float / pin for the mini-player (no-op in the mock).
+  // Real window resize / float / pin for the mini-player.
   useEffect(() => {
     void backend.system.setMiniPlayer(miniPlayer)
   }, [miniPlayer])

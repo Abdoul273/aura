@@ -20,8 +20,8 @@ backendReady
     root.render(
       <div style={{ display: "grid", placeItems: "center", height: "100vh", color: "#ccc", fontFamily: "sans-serif", padding: 24, textAlign: "center" }}>
         <div>
-          <h2>Impossible de démarrer le moteur audio</h2>
-          <p style={{ opacity: 0.7 }}>{String(e)}</p>
+          <h2>Moteur audio indisponible</h2>
+          <p style={{ opacity: 0.7 }}>{e instanceof Error ? e.message : String(e)}</p>
         </div>
       </div>,
     )

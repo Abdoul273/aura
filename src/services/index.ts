@@ -1,20 +1,18 @@
-// The ONLY place the concrete backend is chosen: the real Tauri engine inside
-// the desktop app, the in-memory mock in a plain browser (`npm run dev`).
+// Single injection point: the real Tauri engine (Rust + mpv). No fake data.
 import { isTauri } from "@tauri-apps/api/core"
-import { mockBackend, getTrackSync as getMockTrack } from "./mockBackend"
 import { tauriBackend, initTauriBackend, getTrackSyncTauri } from "./tauriBackend"
 import type { MusicBackend } from "./backend"
 import type { Track } from "../types"
 
-const native = isTauri()
+export const backend: MusicBackend = tauriBackend
 
-export const backend: MusicBackend = native ? tauriBackend : mockBackend
-
-/** Resolves once the backend can answer synchronous calls (player state, track cache). */
-export const backendReady: Promise<void> = native ? initTauriBackend() : Promise.resolve()
+/** Resolves once the engine can answer synchronous calls (player state, track cache). */
+export const backendReady: Promise<void> = isTauri()
+  ? initTauriBackend()
+  : Promise.reject(new Error("Aura doit être ouvert dans sa fenêtre d'application (npm run tauri dev), pas dans un navigateur."))
 
 export function getTrackSync(id: string): Track | undefined {
-  return native ? getTrackSyncTauri(id) : getMockTrack(id)
+  return getTrackSyncTauri(id)
 }
 
 export type { MusicBackend, SearchResults, Unsubscribe } from "./backend"
