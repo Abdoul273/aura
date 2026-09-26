@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Installation complète d'Aura en une commande :
-#   1. met à jour le système et installe les dépendances (Arch, Debian/Ubuntu, Fedora)
+#   1. propose la mise à jour du système et installe les dépendances manquantes (Arch, Debian/Ubuntu, Fedora)
 #   2. compile l'application en mode release
 #   3. l'ajoute au lanceur d'applications (binaire, icônes, entrée .desktop)
 #
-#   ./install.sh               tout faire (ou mettre à jour Aura)
-#   ./install.sh --no-update   ne pas mettre à jour le système, juste les dépendances
+#   ./install.sh               tout faire (ou mettre à jour Aura) ; demande avant de mettre à jour le système
+#   ./install.sh --update      mettre à jour le système sans demander
+#   ./install.sh --no-update   ne pas mettre à jour le système ni poser la question
 #   ./install.sh --uninstall   retirer Aura (la bibliothèque et les réglages sont conservés)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -13,7 +14,7 @@ cd "$(dirname "$0")"
 BIN="$HOME/.local/bin/aura"
 APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor"
-UPDATE=1
+UPDATE=ask
 
 say() { printf '\n\033[1;35m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31mErreur :\033[0m %s\n' "$*" >&2; exit 1; }
@@ -32,6 +33,7 @@ for arg in "$@"; do
       echo "Aura est désinstallé (bibliothèque et réglages conservés)."
       exit 0
       ;;
+    --update) UPDATE=1 ;;
     --no-update) UPDATE=0 ;;
     *) die "option inconnue : $arg" ;;
   esac
@@ -40,6 +42,15 @@ done
 [[ $EUID -eq 0 ]] && die "lancez ce script en utilisateur normal (il demandera sudo quand il le faut)."
 
 # ---------- 1. Système et dépendances ----------
+
+# Demande (non par défaut) ; sans terminal interactif, on ne met pas à jour.
+want_update() {
+  [[ $UPDATE == 1 ]] && return 0
+  [[ $UPDATE == 0 || ! -t 0 ]] && return 1
+  local r
+  read -rp $'\n\033[1;35m==>\033[0m \033[1mMettre à jour le système avant d\'installer Aura ? [o/N]\033[0m ' r
+  [[ ${r,,} == o* || ${r,,} == y* ]]
+}
 
 version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
 
@@ -52,7 +63,6 @@ install_rustup() {
 
 if has pacman; then
   say "Arch Linux détecté"
-  [[ $UPDATE -eq 1 ]] && { say "Mise à jour du système"; sudo pacman -Syu; }
   pkgs=(base-devel git curl wget file openssl webkit2gtk-4.1 gtk3 librsvg mpv pipewire nodejs npm)
   # rust et rustup sont en conflit : on garde celui qui est déjà là.
   if has rustup; then
@@ -60,16 +70,35 @@ if has pacman; then
   else
     pkgs+=(rust)
   fi
-  say "Installation des dépendances"
-  sudo pacman -S --needed "${pkgs[@]}"
+  if want_update; then
+    say "Mise à jour du système"
+    sudo pacman -Syu || echo "Mise à jour annulée, on continue."
+  fi
+  mapfile -t missing < <(pacman -T "${pkgs[@]}" || true)
+  if ((${#missing[@]})); then
+    say "Installation des dépendances manquantes : ${missing[*]}"
+    sudo pacman -S --needed "${missing[@]}" || die "installation impossible (si pacman signale des paquets introuvables, relancez avec --update)."
+  else
+    say "Toutes les dépendances sont déjà installées"
+  fi
 
 elif has apt-get; then
   say "Debian / Ubuntu détecté"
-  sudo apt-get update
-  [[ $UPDATE -eq 1 ]] && { say "Mise à jour du système"; sudo apt-get upgrade -y; }
-  say "Installation des dépendances"
-  sudo apt-get install -y build-essential git curl wget file pkg-config libssl-dev libdbus-1-dev \
-    libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev mpv pipewire-bin
+  pkgs=(build-essential git curl wget file pkg-config libssl-dev libdbus-1-dev
+    libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev mpv pipewire-bin)
+  missing=()
+  for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
+  if want_update; then
+    say "Mise à jour du système"
+    sudo apt-get update && sudo apt-get upgrade -y || echo "Mise à jour annulée, on continue."
+  fi
+  if ((${#missing[@]})); then
+    say "Installation des dépendances manquantes : ${missing[*]}"
+    sudo apt-get update
+    sudo apt-get install -y "${missing[@]}" || die "installation des dépendances impossible"
+  else
+    say "Toutes les dépendances sont déjà installées"
+  fi
   if ! has node || ! version_ge "$(node -v | tr -d v)" "20.19.0"; then
     say "Installation de Node.js 22 (NodeSource)"
     curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
@@ -78,11 +107,20 @@ elif has apt-get; then
 
 elif has dnf; then
   say "Fedora détecté"
-  [[ $UPDATE -eq 1 ]] && { say "Mise à jour du système"; sudo dnf upgrade -y; }
-  say "Installation des dépendances"
-  sudo dnf install -y gcc gcc-c++ make git curl wget file openssl-devel dbus-devel \
-    webkit2gtk4.1-devel gtk3-devel librsvg2-devel libappindicator-gtk3-devel pipewire-utils nodejs npm \
-    || die "installation des dépendances impossible"
+  pkgs=(gcc gcc-c++ make git curl wget file openssl-devel dbus-devel
+    webkit2gtk4.1-devel gtk3-devel librsvg2-devel libappindicator-gtk3-devel pipewire-utils nodejs npm)
+  missing=()
+  for p in "${pkgs[@]}"; do rpm -q "$p" >/dev/null 2>&1 || missing+=("$p"); done
+  if want_update; then
+    say "Mise à jour du système"
+    sudo dnf upgrade -y || echo "Mise à jour annulée, on continue."
+  fi
+  if ((${#missing[@]})); then
+    say "Installation des dépendances manquantes : ${missing[*]}"
+    sudo dnf install -y "${missing[@]}" || die "installation des dépendances impossible"
+  else
+    say "Toutes les dépendances sont déjà installées"
+  fi
   has mpv || sudo dnf install -y mpv || die "mpv introuvable : activez RPM Fusion (https://rpmfusion.org) puis relancez."
 
 else
