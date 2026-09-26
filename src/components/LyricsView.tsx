@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Mic2, Music2, RotateCw, LocateFixed, Search, X, Check } from "lucide-react"
 import { backend } from "../services"
 import { usePlayer } from "../store/playerStore"
@@ -200,20 +200,33 @@ function Badge({ children, strong, large }: { children: React.ReactNode; strong?
 
 // ---------- synchronisées ----------
 
-/** Index de la ligne courante, interpolé entre les positions du moteur audio. */
-function useActiveLine(lines: LyricsLine[], offsetMs: number) {
+/** Position de lecture interpolée entre les mises à jour du moteur audio (lecture à la demande, sans rendu). */
+function usePlaybackClock(offsetMs: number) {
+  const anchor = useRef({ pos: usePlayer.getState().positionMs, at: performance.now() })
+  useEffect(
+    () =>
+      usePlayer.subscribe((s, prev) => {
+        if (s.positionMs !== prev.positionMs || s.status !== prev.status) anchor.current = { pos: s.positionMs, at: performance.now() }
+      }),
+    [],
+  )
+  const offset = useRef(offsetMs)
+  offset.current = offsetMs
+  return useCallback(() => {
+    const s = usePlayer.getState()
+    const a = anchor.current
+    const pos = s.status === "playing" ? a.pos + Math.min(performance.now() - a.at, 1000) : s.positionMs
+    return pos + LEAD_MS + offset.current
+  }, [])
+}
+
+/** Index de la dernière ligne commencée. */
+function useActiveLine(lines: LyricsLine[], now: () => number) {
   const [index, setIndex] = useState(-1)
   useEffect(() => {
-    let anchor = { pos: usePlayer.getState().positionMs, at: performance.now() }
-    const unsub = usePlayer.subscribe((s, prev) => {
-      if (s.positionMs !== prev.positionMs || s.status !== prev.status) anchor = { pos: s.positionMs, at: performance.now() }
-    })
-    let timer = 0
+    let raf = 0
     const tick = () => {
-      const s = usePlayer.getState()
-      const pos = s.status === "playing" ? anchor.pos + Math.min(performance.now() - anchor.at, 1000) : s.positionMs
-      const t = pos + LEAD_MS + offsetMs
-      // Recherche dichotomique de la dernière ligne commencée.
+      const t = now()
       let lo = 0
       let hi = lines.length - 1
       let found = -1
@@ -224,37 +237,121 @@ function useActiveLine(lines: LyricsLine[], offsetMs: number) {
           lo = mid + 1
         } else hi = mid - 1
       }
-      setIndex((previous) => previous === found ? previous : found)
-      timer = window.setTimeout(tick, 50)
+      setIndex((previous) => (previous === found ? previous : found))
+      raf = requestAnimationFrame(tick)
     }
     tick()
-    return () => {
-      window.clearTimeout(timer)
-      unsub()
-    }
-  }, [lines, offsetMs])
+    return () => cancelAnimationFrame(raf)
+  }, [lines, now])
   return index
+}
+
+/** Défilement animé (ease-out) : plus doux et régulier que le smooth natif de WebKitGTK. */
+function useSmoothScroll() {
+  const raf = useRef(0)
+  const cancel = useCallback(() => cancelAnimationFrame(raf.current), [])
+  const to = useCallback((box: HTMLElement, target: number, duration = 750) => {
+    cancelAnimationFrame(raf.current)
+    const from = box.scrollTop
+    const delta = target - from
+    if (Math.abs(delta) < 1) return
+    const t0 = performance.now()
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / duration)
+      const e = 1 - Math.pow(1 - k, 4)
+      box.scrollTop = from + delta * e
+      if (k < 1) raf.current = requestAnimationFrame(step)
+    }
+    raf.current = requestAnimationFrame(step)
+  }, [])
+  useEffect(() => cancel, [cancel])
+  return { to, cancel }
+}
+
+/** Ligne active : balayage karaoké mot à mot, réparti selon la longueur des mots. */
+function KaraokeLine({ text, start, end, now, large }: { text: string; start: number; end: number; now: () => number; large?: boolean }) {
+  const words = useMemo(() => text.split(/(\s+)/).filter(Boolean), [text])
+  const spans = useRef<(HTMLSpanElement | null)[]>([])
+  useEffect(() => {
+    const weights = words.map((w) => (/^\s+$/.test(w) ? 0 : w.length + 2))
+    const total = weights.reduce((a, b) => a + b, 0) || 1
+    // Durée chantée : bornée par la ligne suivante, estimée d'après la longueur du texte.
+    const dur = Math.max(400, Math.min(end - start - 150, Math.max(1100, total * 85)))
+    let raf = 0
+    const tick = () => {
+      const p = Math.max(0, Math.min(1, (now() - start) / dur)) * total
+      let acc = 0
+      words.forEach((_, i) => {
+        const el = spans.current[i]
+        const w = weights[i]
+        if (!el || !w) return
+        const f = Math.max(0, Math.min(1, (p - acc) / w))
+        acc += w
+        el.style.setProperty("--f", `${(f * 124 - 12).toFixed(1)}%`)
+        el.style.transform = `translateY(${(-2 * Math.sin(f * Math.PI)).toFixed(2)}px)`
+      })
+      raf = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => cancelAnimationFrame(raf)
+  }, [words, start, end, now])
+  const lit = large ? "#fff" : "var(--text-hi)"
+  const dim = large ? "rgba(255,255,255,.38)" : "color-mix(in srgb, var(--text-hi) 38%, transparent)"
+  return (
+    <>
+      {words.map((w, i) =>
+        /^\s+$/.test(w) ? (
+          w
+        ) : (
+          <span
+            key={i}
+            ref={(el) => void (spans.current[i] = el)}
+            className="inline-block"
+            style={{
+              ["--f" as string]: "-12%",
+              backgroundImage: `linear-gradient(90deg, ${lit} calc(var(--f) - 12%), ${dim} calc(var(--f) + 12%))`,
+              backgroundSize: "100% 100%",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+              WebkitTextFillColor: "transparent",
+            }}
+          >
+            {w}
+          </span>
+        ),
+      )}
+    </>
+  )
 }
 
 function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }: { lines: LyricsLine[]; source: string; approximate: boolean; large?: boolean; onRefresh: () => void; onSearch: () => void }) {
   const seek = usePlayer((s) => s.seek)
   const trackId = usePlayer((s) => s.currentTrackId)
   const [offsetMs, setOffsetMs] = useState(() => Number(localStorage.getItem(`aura:lyric-offset:${trackId}`)) || 0)
-  const active = useActiveLine(lines, offsetMs)
+  const now = usePlaybackClock(offsetMs)
+  const active = useActiveLine(lines, now)
+  const smooth = useSmoothScroll()
   const scroller = useRef<HTMLDivElement>(null)
   const refs = useRef<(HTMLElement | null)[]>([])
   const introRef = useRef<HTMLDivElement>(null)
   const [follow, setFollow] = useState(true)
+  const followRef = useRef(follow)
+  followRef.current = follow
   const resumeTimer = useRef(0)
   const firstScroll = useRef(true)
   const hasIntro = lines[0].timeMs > 2500
 
-  const scrollToActive = (smooth: boolean) => {
+  const scrollToActive = (animate: boolean) => {
     const box = scroller.current
     const el = active >= 0 ? refs.current[active] : introRef.current
     if (!box || !el) return
-    const top = el.offsetTop - box.clientHeight * 0.36 + el.offsetHeight / 2
-    box.scrollTo({ top: Math.max(0, top), behavior: smooth ? "smooth" : "auto" })
+    const top = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, el.offsetTop - box.clientHeight * 0.36 + el.offsetHeight / 2))
+    if (animate) smooth.to(box, top)
+    else {
+      smooth.cancel()
+      box.scrollTop = top
+    }
   }
 
   useLayoutEffect(() => {
@@ -268,7 +365,7 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
   useEffect(() => {
     const box = scroller.current
     if (!box) return
-    const ro = new ResizeObserver(() => follow && scrollToActive(false))
+    const ro = new ResizeObserver(() => followRef.current && scrollToActive(false))
     ro.observe(box)
     return () => ro.disconnect()
   })
@@ -276,6 +373,7 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
   useEffect(() => () => window.clearTimeout(resumeTimer.current), [])
 
   const userScrolled = () => {
+    smooth.cancel()
     setFollow(false)
     window.clearTimeout(resumeTimer.current)
     resumeTimer.current = window.setTimeout(() => setFollow(true), RESUME_FOLLOW_MS)
@@ -331,6 +429,7 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
                   <Dots on={state === "active"} large={large} />
                 </div>
               )
+            const dist = i - active
             return (
               <button
                 key={i}
@@ -340,13 +439,26 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
                   resync()
                 }}
                 className={cn(
-                  "block w-full rounded-lg text-left font-extrabold tracking-tight antialiased transition-[color,transform] duration-300 ease-out",
-                  large ? "text-[clamp(1.6rem,2.5vw,2.35rem)] leading-[1.18]" : "text-[1.3rem] leading-[1.25]",
+                  "block w-full origin-left rounded-lg text-left font-extrabold tracking-tight antialiased",
+                  "transition-[color,transform,opacity,text-shadow] duration-[650ms] ease-[cubic-bezier(.22,1,.36,1)]",
+                  large ? "text-[clamp(1.7rem,2.6vw,2.6rem)] leading-[1.18]" : "text-[1.3rem] leading-[1.25]",
                   "text-[color:var(--c)] hover:text-[color:var(--hover)]",
                 )}
-                style={{ ["--c" as string]: colorFor(state), ["--hover" as string]: state === "active" ? colorFor(state) : large ? "rgba(255,255,255,.85)" : "var(--text-hi)" }}
+                style={{
+                  ["--c" as string]: colorFor(state),
+                  ["--hover" as string]: state === "active" ? colorFor(state) : large ? "rgba(255,255,255,.85)" : "var(--text-hi)",
+                  transform: state === "active" ? "scale(1)" : `scale(${large ? 0.94 : 0.96})`,
+                  opacity: state === "active" ? 1 : follow ? Math.max(large ? 0.35 : 0.5, 1 - Math.abs(dist) * 0.14) : 1,
+                  textShadow: state === "active" && large ? "0 0 28px rgba(255,255,255,.35)" : "0 0 0 transparent",
+                  // Effet de vague : les lignes suivantes rattrapent la position avec un léger retard.
+                  transitionDelay: follow && dist > 0 ? `${Math.min(dist, 6) * 40}ms` : "0ms",
+                }}
               >
-                {line.text}
+                {state === "active" ? (
+                  <KaraokeLine text={line.text} start={line.timeMs} end={lines[i + 1]?.timeMs ?? line.timeMs + 6000} now={now} large={large} />
+                ) : (
+                  line.text
+                )}
               </button>
             )
           })}

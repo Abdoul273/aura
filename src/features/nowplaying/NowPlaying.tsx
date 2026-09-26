@@ -79,8 +79,8 @@ export default function NowPlaying() {
           </div>
 
           {/* body */}
-          <div className="absolute inset-x-0 bottom-[250px] top-[92px] grid grid-cols-1 place-items-center gap-8 px-10 lg:grid-cols-2">
-            <div className="grid place-items-center" style={{ perspective: 1200 }}>
+          <div className="absolute inset-x-0 bottom-[272px] top-[92px] grid grid-cols-1 grid-rows-[minmax(0,1fr)] place-items-center gap-8 px-10 lg:grid-cols-2">
+            <div className={panel === "lyrics" ? "hidden place-items-center lg:grid" : "grid place-items-center"} style={{ perspective: 1200 }}>
               {track && (
                 <motion.div layoutId="np-cover" style={{ rotateX: rx, rotateY: ry, transformStyle: "preserve-3d" }} className="relative">
                   <CoverArt colors={track.colors} seed={track.albumId} size={420} rounded="rounded-3xl" className="w-[min(42vw,420px,calc(100vh-400px))] shadow-2xl" />
@@ -95,7 +95,7 @@ export default function NowPlaying() {
 
             <AnimatePresence mode="wait">
               {panel === "lyrics" && (
-                <motion.div key="lyrics" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 30 }} className="h-full w-full max-w-2xl">
+                <motion.div key="lyrics" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 30 }} className="h-full min-h-0 w-full max-w-2xl self-stretch">
                   <LyricsView large />
                 </motion.div>
               )}
