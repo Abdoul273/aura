@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { useUI } from "./store/uiStore"
 import { useSettings } from "./store/settingsStore"
@@ -8,6 +8,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts"
 import { useDynamicColor } from "./hooks/useDynamicColor"
 
 import DynamicBackground from "./components/DynamicBackground"
+import PanelResizeHandle, { savedPanelWidth } from "./components/PanelResizeHandle"
 import Sidebar from "./features/shell/Sidebar"
 import TopBar from "./features/shell/TopBar"
 import PlayerBar from "./features/shell/PlayerBar"
@@ -57,10 +58,16 @@ function CurrentScreen() {
 }
 
 export default function App() {
+  const layoutStyle = useRef<Record<string, string>>({
+    "--sidebar-width": `${savedPanelWidth("sidebar")}px`,
+    "--drawer-width": `${savedPanelWidth("drawer")}px`,
+  })
   const route = useUI((s) => s.route)
   const miniPlayer = useUI((s) => s.miniPlayer)
   const loadSettings = useSettings((s) => s.load)
   const settingsReady = useSettings((s) => !!s.settings)
+  const sidebarCollapsed = useSettings((s) => s.settings?.sidebarCollapsed ?? false)
+  const drawerOpen = useSettings((s) => s.settings?.drawerOpen ?? false)
   const loadFavorites = useLibrary((s) => s.loadFavorites)
   const libraryVersion = useLibrary((s) => s.version)
 
@@ -90,8 +97,9 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden p-3">
       <DynamicBackground />
-      <div className="flex min-h-0 flex-1 gap-3">
+      <div data-panel-layout className="flex min-h-0 flex-1 gap-1" style={layoutStyle.current}>
         <Sidebar />
+        {!sidebarCollapsed && <PanelResizeHandle side="sidebar" />}
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
           <main className="glass-panel relative min-h-0 flex-1 overflow-hidden rounded-3xl">
@@ -111,6 +119,7 @@ export default function App() {
             </div>
           </main>
         </div>
+        {drawerOpen && <PanelResizeHandle side="drawer" />}
         <RightDrawer />
       </div>
       <div className="mt-3">

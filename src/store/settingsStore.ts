@@ -26,7 +26,7 @@ export function applyTheme(s: Settings) {
   const root = document.documentElement
   root.classList.toggle("light", s.theme === "light")
   root.style.setProperty("--accent", s.accent)
-  // blur intensity 0..100 -> 22px..52px (default 65 ≈ 40px for a strong glass look)
-  root.style.setProperty("--blur", `${22 + (s.blurIntensity / 100) * 30}px`)
+  // Keep the glass effect subtle: large blurred surfaces are costly in WebKitGTK.
+  root.style.setProperty("--blur", `${4 + (s.blurIntensity / 100) * 10}px`)
   root.dataset.animations = s.animations ? "on" : "off"
 }

@@ -4,6 +4,7 @@ import {
   Mic2, ListMusic, Minimize2, Maximize2,
 } from "lucide-react"
 import { usePlayer } from "../../store/playerStore"
+import { useShallow } from "zustand/react/shallow"
 import { useUI } from "../../store/uiStore"
 import { useLibrary } from "../../store/libraryStore"
 import { useSettings } from "../../store/settingsStore"
@@ -20,14 +21,13 @@ import { useEffect, useState } from "react"
 import type { RadioStation } from "../../types"
 
 export default function PlayerBar() {
-  const p = usePlayer()
+  const p = usePlayer(useShallow((s) => ({ ...s, positionMs: 0 })))
   const ui = useUI()
   const favorites = useLibrary((s) => s.favorites)
   const toggleFav = useLibrary((s) => s.toggleFavorite)
   const drawerOpen = useSettings((s) => s.settings?.drawerOpen ?? false)
   const drawerTab = useSettings((s) => s.settings?.drawerTab ?? "queue")
   const updateSettings = useSettings((s) => s.update)
-  const [showRemaining, setShowRemaining] = useState(false)
   const [radio, setRadio] = useState<RadioStation | null>(null)
 
   useEffect(() => {
@@ -132,10 +132,7 @@ export default function PlayerBar() {
             </div>
           ) : (
             <>
-              <WaveformSeek positionMs={p.positionMs} durationMs={p.durationMs} onSeek={p.seek} seed={track?.id ?? "none"} />
-              <button onClick={() => setShowRemaining((s) => !s)} className="w-10 shrink-0 text-left text-xs text-lo tnum">
-                {showRemaining ? `-${formatTime(Math.max(0, p.durationMs - p.positionMs))}` : formatTime(p.durationMs)}
-              </button>
+              <Progress durationMs={p.durationMs} seed={track?.id ?? "none"} onSeek={p.seek} />
             </>
           )}
         </div>
@@ -160,4 +157,15 @@ export default function PlayerBar() {
       </div>
     </div>
   )
+}
+
+function Progress({ durationMs, seed, onSeek }: { durationMs: number; seed: string; onSeek: (ms: number) => void }) {
+  const positionMs = usePlayer((s) => s.positionMs)
+  const [showRemaining, setShowRemaining] = useState(false)
+  return <>
+    <WaveformSeek positionMs={positionMs} durationMs={durationMs} onSeek={onSeek} seed={seed} />
+    <button onClick={() => setShowRemaining((s) => !s)} className="w-10 shrink-0 text-left text-xs text-lo tnum">
+      {showRemaining ? `-${formatTime(Math.max(0, durationMs - positionMs))}` : formatTime(durationMs)}
+    </button>
+  </>
 }

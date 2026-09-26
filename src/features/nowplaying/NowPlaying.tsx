@@ -5,6 +5,7 @@ import {
   Heart, Mic2, AudioWaveform, CircleDot, BarChart3,
 } from "lucide-react"
 import { usePlayer } from "../../store/playerStore"
+import { useShallow } from "zustand/react/shallow"
 import { useUI } from "../../store/uiStore"
 import { useLibrary } from "../../store/libraryStore"
 import { getTrackSync } from "../../services"
@@ -21,7 +22,7 @@ type Panel = "none" | "lyrics" | "viz"
 export default function NowPlaying() {
   const open = useUI((s) => s.nowPlayingOpen)
   const setOpen = useUI((s) => s.setNowPlaying)
-  const p = usePlayer()
+  const p = usePlayer(useShallow((s) => ({ ...s, positionMs: 0 })))
   const favorites = useLibrary((s) => s.favorites)
   const toggleFav = useLibrary((s) => s.toggleFavorite)
   const [panel, setPanel] = useState<Panel>("none")
@@ -152,7 +153,7 @@ export default function NowPlaying() {
                 )}
               </div>
               <div className="[--accent:#ffffff]">
-                <WaveformSeek positionMs={p.positionMs} durationMs={p.durationMs} onSeek={p.seek} seed={track?.id ?? "np"} bars={120} />
+                <NowPlayingProgress durationMs={p.durationMs} onSeek={p.seek} seed={track?.id ?? "np"} />
               </div>
               <div className="mt-5 flex items-center justify-center gap-6">
                 <IconButton label="Aléatoire" active={p.shuffle} onClick={p.toggleShuffle} size={48}>
@@ -177,4 +178,9 @@ export default function NowPlaying() {
       )}
     </AnimatePresence>
   )
+}
+
+function NowPlayingProgress({ durationMs, onSeek, seed }: { durationMs: number; onSeek: (ms: number) => void; seed: string }) {
+  const positionMs = usePlayer((s) => s.positionMs)
+  return <WaveformSeek positionMs={positionMs} durationMs={durationMs} onSeek={onSeek} seed={seed} bars={120} />
 }

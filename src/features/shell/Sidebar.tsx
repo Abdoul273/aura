@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { motion } from "framer-motion"
 import {
   Home, Search, Library, ListMusic, Disc3, Users, Folder, Radio, Heart, BarChart3,
   Plus, PanelLeftClose, PanelLeft, Music2,
@@ -75,10 +74,10 @@ export default function Sidebar() {
   }
 
   return (
-    <motion.aside
-      animate={{ width: collapsed ? 76 : 248 }}
-      transition={{ type: "spring", stiffness: 300, damping: 34 }}
-      className="glass-panel z-20 flex h-full flex-col rounded-3xl p-3"
+    <aside
+      data-panel="sidebar"
+      style={{ width: collapsed ? 76 : "var(--sidebar-width)" }}
+      className="glass-panel z-20 flex h-full shrink-0 flex-col rounded-3xl p-3"
     >
       <div className={cn("mb-4 flex items-center gap-2 px-2 pt-1", collapsed && "justify-center px-0")}>
         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: "var(--accent)" }}>
@@ -151,6 +150,6 @@ export default function Sidebar() {
       <div className="mt-2 shrink-0 pt-2">
         <OutputStatusChip collapsed={collapsed} />
       </div>
-    </motion.aside>
+    </aside>
   )
 }

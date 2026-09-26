@@ -48,9 +48,21 @@ export const usePlayer = create<PlayerStore>((set, get) => ({
 }))
 
 // Wire backend events -> store. These run once for the app lifetime.
-backend.player.onStateChange(async (s) => {
-  const track = s.currentTrackId ? await backend.library.getTrack(s.currentTrackId) : null
-  usePlayer.setState({ ...s, currentTrack: track })
+let trackRequest = 0
+backend.player.onStateChange((s) => {
+  const previous = usePlayer.getState()
+  const changed = s.currentTrackId !== previous.currentTrackId
+  usePlayer.setState({ ...s, currentTrack: changed ? null : previous.currentTrack })
+  if (changed) {
+    const request = ++trackRequest
+    if (s.currentTrackId) {
+      void backend.library.getTrack(s.currentTrackId).then((track) => {
+        if (request === trackRequest && usePlayer.getState().currentTrackId === s.currentTrackId) {
+          usePlayer.setState({ currentTrack: track })
+        }
+      })
+    }
+  }
 })
 backend.player.onPosition((ms) => usePlayer.setState({ positionMs: ms }))
 // The analyser stream is subscribed by <Visualizer> only while it is on screen

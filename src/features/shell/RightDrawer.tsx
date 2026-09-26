@@ -68,11 +68,13 @@ export default function RightDrawer() {
     <AnimatePresence>
       {open && (
         <motion.aside
-          initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 340, opacity: 1 }}
-          exit={{ width: 0, opacity: 0 }}
-          transition={{ type: "spring", stiffness: 300, damping: 34 }}
-          className="glass-panel z-20 ml-3 flex h-full flex-col overflow-hidden rounded-3xl"
+          data-panel="drawer"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          style={{ width: "var(--drawer-width)" }}
+          transition={{ duration: 0.15 }}
+          className="glass-panel z-20 flex h-full shrink-0 flex-col overflow-hidden rounded-3xl"
         >
           <div className="flex shrink-0 items-center gap-1 p-3">
             {(["queue", "lyrics"] as const).map((t) => (
@@ -93,7 +95,7 @@ export default function RightDrawer() {
             )}
           </div>
 
-          <div className={cn("min-h-0 flex-1", tab === "lyrics" ? "overflow-hidden" : "overflow-y-auto px-3 pb-4")} style={{ width: 340 }}>
+          <div className={cn("min-h-0 flex-1", tab === "lyrics" ? "overflow-hidden" : "overflow-y-auto px-3 pb-4")}>
             {tab === "lyrics" ? (
               <LyricsView />
             ) : (
