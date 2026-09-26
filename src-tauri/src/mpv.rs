@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -59,6 +60,17 @@ impl Mpv {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+        // mpv meurt avec Aura (fermeture brutale, déconnexion) : sinon il reste
+        // orphelin, continue de jouer et garde l'ancienne session ouverte.
+        // Lancé depuis le thread principal, qui vit aussi longtemps que l'appli.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 || libc::getppid() == 1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
         let child = cmd.spawn().map_err(|e| format!("Impossible de lancer mpv : {e}"))?;
 
         // Attend que le socket soit prêt.

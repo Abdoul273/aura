@@ -23,6 +23,7 @@ souvlaki = "0.8"
 rustfft = "6"
 ureq = { version = "3", features = ["json"] }
 dirs = "6"
+libc = "0.2"
 
 [profile.release]
 lto = true
