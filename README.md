@@ -13,6 +13,7 @@ npm install
 npm run tauri dev      # application de bureau, vrai moteur audio
 # (npm run dev seul ne sert à rien : le moteur tourne dans la fenêtre Tauri)
 npm run tauri build    # paquets .deb / .rpm / AppImage
+./install.sh           # compile et ajoute Aura au lanceur d'applications (--uninstall pour retirer)
 ```
 
 ## Moteur (src-tauri)

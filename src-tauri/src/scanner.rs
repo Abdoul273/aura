@@ -305,11 +305,21 @@ fn find_cover(paths: &[String]) -> Option<DynamicImage> {
     None
 }
 
+/// Écriture atomique (fichier temporaire puis renommage) : un lecteur externe
+/// (Caelestia via MPRIS) ne doit jamais voir une image à moitié écrite.
 fn save_cover(img: &DynamicImage, dest: &Path) -> bool {
     let small = if img.width() > COVER_SIZE || img.height() > COVER_SIZE { img.thumbnail(COVER_SIZE, COVER_SIZE) } else { img.clone() };
-    let Ok(file) = std::fs::File::create(dest) else { return false };
-    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(std::io::BufWriter::new(file), 90);
-    enc.encode_image(&DynamicImage::ImageRgb8(small.to_rgb8())).is_ok()
+    let tmp = dest.with_extension("jpg.part");
+    let Ok(file) = std::fs::File::create(&tmp) else { return false };
+    let mut w = std::io::BufWriter::new(file);
+    let ok = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut w, 90).encode_image(&DynamicImage::ImageRgb8(small.to_rgb8())).is_ok();
+    let ok = ok && std::io::Write::flush(&mut w).is_ok();
+    drop(w);
+    if ok && std::fs::rename(&tmp, dest).is_ok() {
+        return true;
+    }
+    let _ = std::fs::remove_file(&tmp);
+    false
 }
 
 // ---------- couleurs ----------
