@@ -314,12 +314,21 @@ async function reloadLibrary() {
 }
 
 /** À attendre avant de monter l'application (les stores lisent l'état au chargement). */
+/** Étape de démarrage en cours, affichée si le démarrage reste bloqué. */
+export let bootStep = "connexion au moteur"
+
+function step<T>(label: string, p: Promise<T>, ms = 15000): Promise<T> {
+  bootStep = label
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`Le moteur ne répond pas (${label}).`)), ms))])
+}
+
 export async function initTauriBackend() {
-  const [snap, st] = await Promise.all([invoke<Snapshot>("library_snapshot"), invoke<PlayerState>("player_state")])
+  const snap = await step("lecture de la bibliothèque", invoke<Snapshot>("library_snapshot"))
+  const st = await step("état du lecteur", invoke<PlayerState>("player_state"))
   buildIndex(snap)
   state = st
 
-  await Promise.all([
+  await step("abonnement aux événements", Promise.all([
     listen<PlayerState>("player:state", (e) => {
       state = e.payload
       stateCh.emit(state)
@@ -349,8 +358,8 @@ export async function initTauriBackend() {
       }
       stateCh.emit({ ...state })
     }),
-  ])
-  if (await invoke<boolean>("library_is_scanning")) lastScan = { scanning: true, current: 0, total: 0, currentPath: "" }
+  ]))
+  if (await step("état du scan", invoke<boolean>("library_is_scanning"))) lastScan = { scanning: true, current: 0, total: 0, currentPath: "" }
 }
 
 export function getTrackSyncTauri(id: string): Track | undefined {
