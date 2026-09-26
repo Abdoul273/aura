@@ -4,16 +4,31 @@ Lecteur de musique de bureau « liquid glass » pour Linux (Tauri 2 + React),
 pensé pour de grandes bibliothèques locales (FLAC / MP3 / M4A / OPUS…) et
 les radios internet. Interface générée avec Figma Make, moteur écrit en Rust.
 
-## Lancer
+## Installation
 
-Dépendances système (Arch) : `mpv`, `pipewire` (pour `pw-record`), `webkit2gtk-4.1`, Rust, Node.
+Une seule commande (Arch / EndeavourOS, Debian / Ubuntu, Fedora) : le script
+met le système à jour, installe les dépendances (mpv, PipeWire, WebKitGTK,
+Rust, Node.js), compile Aura et l'ajoute au lanceur d'applications.
 
-```fish
+```sh
+git clone https://github.com/Abdoul273/aura.git
+cd aura
+./install.sh
+```
+
+- `./install.sh --no-update` : sans mise à jour complète du système.
+- `./install.sh --uninstall` : retire Aura (bibliothèque et réglages conservés).
+- Relancer `./install.sh` après un `git pull` met Aura à jour.
+
+Vos données (favoris, playlists, statistiques, réglages) sont dans
+`~/.local/share/com.abdoul273.aura` et `~/.config/com.abdoul273.aura` :
+copiez ces deux dossiers pour les retrouver sur un autre PC.
+
+## Développement
+
+```sh
 npm install
-npm run tauri dev      # application de bureau, vrai moteur audio
-# (npm run dev seul ne sert à rien : le moteur tourne dans la fenêtre Tauri)
-npm run tauri build    # paquets .deb / .rpm / AppImage
-./install.sh           # compile et ajoute Aura au lanceur d'applications (--uninstall pour retirer)
+npm run tauri dev      # fenêtre de l'application avec rechargement à chaud
 ```
 
 ## Moteur (src-tauri)
