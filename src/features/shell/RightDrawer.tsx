@@ -10,15 +10,12 @@ import LyricsView from "../../components/LyricsView"
 import { formatTime } from "../../utils/format"
 import { cn } from "../../utils/cn"
 
-function QueueRow({ item, index, isCurrent, onPlay, onRemove }: { item: QueueItem; index: number; isCurrent: boolean; onPlay: () => void; onRemove: () => void }) {
+function QueueRow({ item, index, isCurrent, onPlay, onRemove, onDragEnd }: { item: QueueItem; index: number; isCurrent: boolean; onPlay: () => void; onRemove: () => void; onDragEnd?: () => void }) {
   const t = getTrackSync(item.trackId) as Track | undefined
   if (!t) return null
-  return (
-    <Reorder.Item
-      value={item}
-      className={cn("group flex cursor-grab items-center gap-2 rounded-xl px-2 py-1.5 active:cursor-grabbing", isCurrent ? "bg-white/10" : "hover:bg-white/6")}
-    >
-      <GripVertical size={14} className="shrink-0 text-lo opacity-0 group-hover:opacity-100" />
+  const body = (
+    <>
+      {!isCurrent && <GripVertical size={14} className="shrink-0 text-lo opacity-0 group-hover:opacity-100" />}
       <CoverArt colors={t.colors} seed={t.albumId} size={36} rounded="rounded-md" className="h-9 w-9 shrink-0" />
       <button onDoubleClick={onPlay} className="min-w-0 flex-1 text-left">
         <div className="truncate text-sm font-medium text-hi" style={isCurrent ? { color: "var(--accent)" } : undefined}>{t.title}</div>
@@ -29,6 +26,17 @@ function QueueRow({ item, index, isCurrent, onPlay, onRemove }: { item: QueueIte
         <X size={14} />
       </button>
       <span className="hidden">{index}</span>
+    </>
+  )
+  // Le morceau en cours est hors du Reorder.Group : un Reorder.Item y ferait planter framer-motion.
+  if (isCurrent) return <div className="group flex items-center gap-2 rounded-xl bg-white/10 px-2 py-1.5">{body}</div>
+  return (
+    <Reorder.Item
+      value={item}
+      onDragEnd={onDragEnd}
+      className="group flex cursor-grab items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/6 active:cursor-grabbing"
+    >
+      {body}
     </Reorder.Item>
   )
 }
@@ -104,15 +112,15 @@ export default function RightDrawer() {
                     {upNext.map((item) => {
                       const realIndex = queue.findIndex((q) => q.uid === item.uid)
                       return (
-                        <div key={item.uid} onDragEnd={() => persistMove(item)}>
-                          <QueueRow
-                            item={item}
-                            index={realIndex}
-                            isCurrent={false}
-                            onPlay={() => backend.player.play(queue.map((q) => q.trackId), realIndex)}
-                            onRemove={() => backend.queue.remove(realIndex)}
-                          />
-                        </div>
+                        <QueueRow
+                          key={item.uid}
+                          item={item}
+                          index={realIndex}
+                          isCurrent={false}
+                          onPlay={() => backend.player.play(queue.map((q) => q.trackId), realIndex)}
+                          onRemove={() => backend.queue.remove(realIndex)}
+                          onDragEnd={() => persistMove(item)}
+                        />
                       )
                     })}
                   </Reorder.Group>
