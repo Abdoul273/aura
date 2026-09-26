@@ -53,4 +53,5 @@ backend.player.onStateChange(async (s) => {
   usePlayer.setState({ ...s, currentTrack: track })
 })
 backend.player.onPosition((ms) => usePlayer.setState({ positionMs: ms }))
-backend.player.onAnalyser((bins) => usePlayer.setState({ analyser: bins }))
+// The analyser stream is subscribed by <Visualizer> only while it is on screen
+// (the real backend captures audio just for that).

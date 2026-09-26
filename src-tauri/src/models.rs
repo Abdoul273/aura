@@ -66,6 +66,8 @@ pub struct PlayerState {
     pub queue_index: i64,
     pub history: Vec<String>,
     pub radio_id: Option<String>,
+    /// Titre diffusé par la radio en cours (métadonnées ICY).
+    pub radio_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

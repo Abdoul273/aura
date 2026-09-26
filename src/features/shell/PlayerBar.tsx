@@ -75,7 +75,7 @@ export default function PlayerBar() {
                 {track && <QualityBadge track={track} />}
               </div>
               <button onClick={() => track && ui.navigate({ name: "artist", id: track.artistId })} className="block max-w-full truncate text-left text-xs text-mid hover:underline">
-                {track?.artist ?? radio!.nowPlaying ?? radio!.genre}
+                {track?.artist ?? p.radioTitle ?? radio!.nowPlaying ?? radio!.genre}
               </button>
             </div>
             {track && (

@@ -156,6 +156,7 @@ impl Player {
             queue_index: i.queue_index,
             history: i.history.clone(),
             radio_id: i.radio_id.clone(),
+            radio_title: i.radio_title.clone(),
         }
     }
 
@@ -810,7 +811,7 @@ impl Player {
                     if title != i.radio_title {
                         i.radio_title = title.clone();
                         let _ = self.app.emit("radio:nowplaying", json!({ "id": i.radio_id, "title": title }));
-                        self.update_media(i);
+                        self.emit_state(i);
                     }
                 }
             }

@@ -48,6 +48,8 @@ export interface MusicBackend {
     getRediscover(): Promise<Album[]>
     rescan(): Promise<void>
     onScanProgress(cb: (p: ScanProgress) => void): Unsubscribe
+    /** Fired when the library content changed (scan finished, folder added…). */
+    onChanged(cb: () => void): Unsubscribe
   }
   player: {
     play(trackIds: string[], startIndex: number): Promise<void>
@@ -121,7 +123,9 @@ export interface MusicBackend {
   }
   system: {
     onMediaKey(cb: (key: "play" | "pause" | "next" | "prev") => void): Unsubscribe
-    minimizeToMiniPlayer(): Promise<void>
+    setMiniPlayer(on: boolean): Promise<void>
     openInFileManager(path: string): Promise<void>
+    /** Native folder picker: path, null if cancelled, undefined if no native picker exists. */
+    pickFolder(): Promise<string | null | undefined>
   }
 }

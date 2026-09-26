@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
-import { Play, Shuffle } from "lucide-react"
+import { FolderSearch, Loader2, Play, Shuffle } from "lucide-react"
 import type { Album, Track, Playlist, RadioStation } from "../../types"
 import { backend } from "../../services"
 import CoverArt from "../../components/CoverArt"
 import { AlbumCard, PlaylistCard, RadioCard, Carousel } from "../../components/cards"
 import { CardGridSkeleton } from "../../components/Skeleton"
+import EmptyState from "../../components/EmptyState"
+import { useLibrary } from "../../store/libraryStore"
 import IconButton from "../../components/IconButton"
 import { usePlaybackActions } from "../../hooks/usePlaybackActions"
 import { useUI } from "../../store/uiStore"
@@ -42,6 +44,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const actions = usePlaybackActions()
   const navigate = useUI((s) => s.navigate)
+  const scan = useLibrary((s) => s.scan)
 
   useEffect(() => {
     let alive = true
@@ -86,6 +89,19 @@ export default function Home() {
 
       {loading ? (
         <CardGridSkeleton count={10} />
+      ) : recent.length === 0 ? (
+        <EmptyState
+          icon={scan.scanning ? <Loader2 size={40} className="animate-spin" /> : <FolderSearch size={40} />}
+          title={scan.scanning ? "Analyse de votre musique…" : "Votre bibliothèque est vide"}
+          description={
+            scan.scanning
+              ? scan.total > 0
+                ? `${scan.current} / ${scan.total} fichiers lus. Vos albums apparaîtront ici dans un instant.`
+                : "Recherche des fichiers audio dans vos dossiers de musique."
+              : "Ajoutez un dossier contenant vos fichiers audio (FLAC, MP3, M4A, OPUS…) pour commencer."
+          }
+          action={scan.scanning ? undefined : { label: "Ajouter un dossier de musique", onClick: () => navigate({ name: "settings" }) }}
+        />
       ) : (
         <>
           {hero && (

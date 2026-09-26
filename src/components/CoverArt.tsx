@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { AlbumColors } from "../types"
+import { backend } from "../services"
 import { coverGradient } from "../utils/color"
 import { cn } from "../utils/cn"
 import { Music } from "lucide-react"
@@ -15,10 +16,15 @@ interface Props {
 }
 
 // Album/playlist cover. Renders a deterministic gradient immediately and, when
-// enabled, layers a picsum photo on top once it loads (never blocks layout).
+// enabled, layers the real artwork (from the backend) on top once it loads.
 export default function CoverArt({ colors, seed, size = 200, rounded = "rounded-2xl", className, usePhoto = true, icon }: Props) {
   const [loaded, setLoaded] = useState(false)
-  const photo = usePhoto && seed ? `https://picsum.photos/seed/${seed}/${Math.min(size * 2, 600)}` : null
+  const [failed, setFailed] = useState(false)
+  const photo = usePhoto && seed && !failed ? backend.artwork.getUrl(seed, size) || null : null
+  useEffect(() => {
+    setLoaded(false)
+    setFailed(false)
+  }, [seed])
   return (
     <div
       className={cn("relative overflow-hidden select-none", rounded, className)}
@@ -35,6 +41,7 @@ export default function CoverArt({ colors, seed, size = 200, rounded = "rounded-
           alt=""
           loading="lazy"
           onLoad={() => setLoaded(true)}
+          onError={() => setFailed(true)}
           className={cn("absolute inset-0 h-full w-full object-cover transition-opacity duration-700", loaded ? "opacity-100" : "opacity-0")}
         />
       )}

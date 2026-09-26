@@ -99,7 +99,7 @@ export default function ArtistDetail({ id }: { id: string }) {
           <div className="min-w-0 flex-1 text-center sm:text-left">
             <h1 className="truncate text-5xl font-bold tracking-tight text-white drop-shadow">{artist.name}</h1>
             <p className="mt-2 text-sm font-medium text-white/80 tnum">
-              {formatCount(artist.monthlyListeners)} auditeurs mensuels
+              {formatCount(artist.monthlyListeners)} écoutes
             </p>
             <div className="mt-3 flex flex-wrap justify-center gap-2 sm:justify-start">
               {artist.genres.map((g) => (

@@ -1,7 +1,7 @@
 // Domain types for Aura. The single source of truth shared across the
 // backend contract, the mock implementation and the Zustand stores.
 
-export type Codec = "FLAC" | "MP3" | "OPUS" | "AAC" | "ALAC"
+export type Codec = "FLAC" | "MP3" | "OPUS" | "AAC" | "ALAC" | "VORBIS" | "WAV" | "AIFF" | "WAVPACK" | "APE" | "MPC" | "AUDIO"
 export type AudioQuality = "Hi-Res" | "Lossless" | "Lossy"
 
 export interface Track {
@@ -154,6 +154,7 @@ export interface PlayerState {
   queueIndex: number
   history: string[] // track ids, most recent last
   radioId: string | null
+  radioTitle?: string | null // live ICY title of the current radio
 }
 
 export interface LibraryStats {

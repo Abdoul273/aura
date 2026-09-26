@@ -9,7 +9,8 @@ export default function TopBar() {
   const scan = useLibrary((s) => s.scan)
 
   return (
-    <header className="flex items-center gap-3 px-1 py-3">
+    // data-tauri-drag-region : la barre sert de poignée quand la fenêtre est flottante.
+    <header data-tauri-drag-region className="flex items-center gap-3 px-1 py-3">
       <div className="flex items-center gap-1">
         <IconButton label="Précédent" onClick={back} disabled={!canBack} size={36} className="disabled:opacity-30">
           <ChevronLeft size={20} />

@@ -16,7 +16,6 @@ import type {
   Track,
 } from "../types"
 import { buildMockDb, GENRES, type MockDb } from "./mockData"
-import { coverGradient } from "../utils/color"
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const lat = () => delay(120 + Math.random() * 260)
@@ -336,6 +335,9 @@ export const mockBackend: MusicBackend = {
       scanSubs.add(cb)
       return () => scanSubs.delete(cb)
     },
+    onChanged() {
+      return () => {}
+    },
   },
 
   player: {
@@ -559,11 +561,7 @@ export const mockBackend: MusicBackend = {
 
   artwork: {
     getUrl(albumId, size) {
-      const album = db.albums.find((a) => a.id === albumId)
-      // Deterministic gradient data-URL fallback via CSS is used in UI; expose picsum too.
-      void size
-      void coverGradient
-      return album ? `https://picsum.photos/seed/${albumId}/${size}` : ""
+      return albumId ? `https://picsum.photos/seed/${albumId}/${Math.min(size * 2, 600)}` : ""
     },
   },
 
@@ -674,8 +672,11 @@ export const mockBackend: MusicBackend = {
       mediaKeySubs.add(cb)
       return () => mediaKeySubs.delete(cb)
     },
-    async minimizeToMiniPlayer() {},
+    async setMiniPlayer() {},
     async openInFileManager() {},
+    async pickFolder() {
+      return undefined
+    },
   },
 }
 

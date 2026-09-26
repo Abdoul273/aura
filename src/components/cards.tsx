@@ -65,7 +65,7 @@ export function ArtistCard({ artist, width }: { artist: Artist; width?: number }
     >
       <CoverArt colors={artist.colors} seed={artist.id} size={200} rounded="rounded-full" className="mb-3 shadow-lg" />
       <div className="truncate text-sm font-semibold text-hi">{artist.name}</div>
-      <div className="truncate text-xs text-mid">{formatCount(artist.monthlyListeners)} auditeurs</div>
+      <div className="truncate text-xs text-mid">{formatCount(artist.monthlyListeners)} écoutes</div>
     </motion.div>
   )
 }

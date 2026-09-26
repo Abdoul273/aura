@@ -159,7 +159,14 @@ function LibraryTab({ s, update }: { s: AppSettings; update: (p: Partial<AppSett
 
       <div className="mt-4 flex items-center gap-2">
         <button
-          onClick={() => setAddOpen(true)}
+          onClick={async () => {
+            // Native picker in the desktop app, manual path otherwise.
+            const picked = await backend.system.pickFolder()
+            if (picked) {
+              await backend.settings.addMusicFolder(picked)
+              update({ musicFolders: [...s.musicFolders.filter((f) => f !== picked), picked] })
+            } else if (picked === undefined) setAddOpen(true)
+          }}
           className="focus-ring flex items-center gap-2 rounded-full border border-[var(--glass-border)] px-4 py-2 text-sm text-mid transition-colors hover:text-hi"
         >
           <Plus size={16} /> Ajouter un dossier…

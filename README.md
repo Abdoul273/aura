@@ -1,19 +1,43 @@
 # Aura — lecteur de musique haute-fidélité
 
-Aura est l'interface (frontend uniquement) d'un lecteur de musique de bureau
-« liquid glass » sombre, pensé pour de grandes bibliothèques locales
-(FLAC / MP3 / OPUS) et les radios internet. L'application tourne sur des
-**données factices réalistes** ; un vrai moteur audio (Tauri) se branche plus
-tard en remplaçant **un seul fichier**.
+Lecteur de musique de bureau « liquid glass » pour Linux (Tauri 2 + React),
+pensé pour de grandes bibliothèques locales (FLAC / MP3 / M4A / OPUS…) et
+les radios internet. Interface générée avec Figma Make, moteur écrit en Rust.
 
-```bash
-npm install   # ou pnpm install
-npm run dev
+## Lancer
+
+Dépendances système (Arch) : `mpv`, `pipewire` (pour `pw-record`), `webkit2gtk-4.1`, Rust, Node.
+
+```fish
+npm install
+npm run tauri dev      # application de bureau, vrai moteur audio
+npm run dev            # navigateur seul, données factices (mock)
+npm run tauri build    # paquets .deb / .rpm / AppImage
 ```
+
+## Moteur (src-tauri)
+
+- **Audio** : un processus `mpv` piloté par IPC JSON. Le titre suivant est
+  pré-chargé pour l'enchaînement sans blanc ; égaliseur 10 bandes (filtres
+  lavfi), ReplayGain, choix de la sortie (PipeWire ou ALSA direct), état
+  bit-perfect calculé à partir des formats d'entrée/sortie réels.
+- **Bibliothèque** : scan incrémental (mtime) des dossiers configurés, tags
+  lus par `lofty`, pochettes extraites (image intégrée ou `cover.jpg`) et
+  palettes de couleurs calculées en Rust ; stockage SQLite
+  (`~/.local/share/com.abdoul273.aura/aura.db`).
+- **Système** : MPRIS via `souvlaki` (barre Caelestia, `playerctl`, touches
+  multimédia), mini-lecteur flottant et épinglé sous Hyprland.
+- **Paroles** : `.lrc` à côté du fichier → tag intégré → lrclib.net (cache).
+- **Visualiseur** : capture du moniteur de sortie avec `pw-record` + FFT,
+  uniquement quand un visualiseur est affiché.
+- La file d'attente et la position sont restaurées au démarrage.
+
+Limite connue : le fondu enchaîné (crossfade) est enregistré dans les
+paramètres mais pas encore appliqué par le moteur.
 
 ## Pile technique
 
-React 18 · TypeScript (strict) · Vite · Tailwind CSS v4 · Framer Motion ·
+React 19 · TypeScript (strict) · Vite · Tailwind CSS v4 · Framer Motion ·
 Zustand · lucide-react · @tanstack/react-virtual. Aucune requête réseau réelle,
 aucun élément `<audio>` dans les composants.
 
@@ -33,12 +57,11 @@ désabonnement.
 - `src/services/index.ts` — **seul endroit** où le backend concret est
   référencé :
 
-  ```ts
-  export const backend: MusicBackend = mockBackend
-  ```
-
-  Pour brancher le vrai moteur : implémenter `MusicBackend` et changer cette
-  ligne.
+  il choisit `tauriBackend` dans l'application de bureau et `mockBackend`
+  dans un simple navigateur.
+- `src/services/tauriBackend.ts` — implémentation réelle : appels `invoke`
+  vers Rust et index de la bibliothèque en mémoire (recherche, tris et
+  agrégations albums/artistes instantanés).
 
 Les **composants ne touchent jamais** au backend directement ni ne stockent de
 données en dur : ils lisent les stores Zustand et appellent leurs actions. Les

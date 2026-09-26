@@ -7,6 +7,8 @@ interface LibraryStore {
   artists: Artist[]
   favorites: Set<string>
   scan: ScanProgress
+  /** Bumped whenever the library content changes, so screens can reload. */
+  version: number
   albumsLoaded: boolean
   artistsLoaded: boolean
   loadAlbums: () => Promise<void>
@@ -21,6 +23,7 @@ export const useLibrary = create<LibraryStore>((set, get) => ({
   artists: [],
   favorites: new Set(),
   scan: { scanning: false, current: 0, total: 0, currentPath: "" },
+  version: 0,
   albumsLoaded: false,
   artistsLoaded: false,
   loadAlbums: async () => {
@@ -51,3 +54,10 @@ export const useLibrary = create<LibraryStore>((set, get) => ({
 }))
 
 backend.library.onScanProgress((p) => useLibrary.setState({ scan: p }))
+backend.library.onChanged(() => {
+  const s = useLibrary.getState()
+  useLibrary.setState({ version: s.version + 1 })
+  if (s.albumsLoaded) void s.loadAlbums()
+  if (s.artistsLoaded) void s.loadArtists()
+  void s.loadFavorites()
+})

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { usePlayer } from "../store/playerStore"
+import { backend } from "../services"
 
 export type VizMode = "bars" | "circular" | "waves"
 
@@ -8,17 +8,15 @@ interface Props {
   color?: string
 }
 
-// Canvas visualizer driven by the analyser stream in the player store.
+// Canvas visualizer driven by the backend analyser stream (subscribed while mounted).
 export default function Visualizer({ mode, color = "#ffffff" }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
   const dataRef = useRef<number[]>([])
 
   useEffect(() => {
-    const unsub = usePlayer.subscribe((s) => {
-      dataRef.current = s.analyser
+    return backend.player.onAnalyser((bins) => {
+      dataRef.current = bins
     })
-    dataRef.current = usePlayer.getState().analyser
-    return unsub
   }, [])
 
   useEffect(() => {

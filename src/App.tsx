@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion"
 import { useUI } from "./store/uiStore"
 import { useSettings } from "./store/settingsStore"
 import { useLibrary } from "./store/libraryStore"
+import { backend } from "./services"
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts"
 import { useDynamicColor } from "./hooks/useDynamicColor"
 
@@ -61,6 +62,7 @@ export default function App() {
   const loadSettings = useSettings((s) => s.load)
   const settingsReady = useSettings((s) => !!s.settings)
   const loadFavorites = useLibrary((s) => s.loadFavorites)
+  const libraryVersion = useLibrary((s) => s.version)
 
   useKeyboardShortcuts()
   useDynamicColor()
@@ -70,13 +72,20 @@ export default function App() {
     loadFavorites()
   }, [])
 
+  // Real window resize / float / pin for the mini-player (no-op in the mock).
+  useEffect(() => {
+    void backend.system.setMiniPlayer(miniPlayer)
+  }, [miniPlayer])
+
   if (!settingsReady) {
     return <div className="grid h-screen place-items-center bg-[var(--bg-0)] text-lo">Chargement…</div>
   }
 
   if (miniPlayer) return <MiniPlayer />
 
-  const key = route.name === "album" || route.name === "artist" || route.name === "playlist" ? `${route.name}:${(route as any).id}` : route.name
+  // The library version is part of the key: after a scan the current screen remounts and reloads.
+  const base = route.name === "album" || route.name === "artist" || route.name === "playlist" ? `${route.name}:${(route as any).id}` : route.name
+  const key = `${base}#${libraryVersion}`
 
   return (
     <div className="flex h-screen flex-col overflow-hidden p-3">
