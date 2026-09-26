@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { Mic2, Music2, RotateCw, LocateFixed } from "lucide-react"
+import { Mic2, Music2, RotateCw, LocateFixed, Search, X, Check } from "lucide-react"
+import { backend } from "../services"
 import { usePlayer } from "../store/playerStore"
 import { prefetchLyrics, useLyrics } from "../hooks/useLyrics"
-import type { LyricsLine } from "../types"
+import type { Lyrics, LyricsLine, LyricsResult } from "../types"
 import { cn } from "../utils/cn"
 
 interface Props {
@@ -11,14 +12,15 @@ interface Props {
 }
 
 // La ligne s'allume un peu avant d'être chantée, comme Spotify.
-const LEAD_MS = 150
+const LEAD_MS = 0
 // Après un défilement manuel, on reprend le suivi automatique au bout de ce délai.
 const RESUME_FOLLOW_MS = 3500
 
 export default function LyricsView({ large }: Props) {
   const trackId = usePlayer((s) => s.currentTrackId)
   const nextId = usePlayer((s) => s.queue[s.queueIndex + 1]?.trackId)
-  const { lyrics, loading, refresh } = useLyrics(trackId)
+  const { lyrics, loading, refresh, replace } = useLyrics(trackId)
+  const [searchFor, setSearchFor] = useState<string | null>(null)
 
   useEffect(() => {
     // Laisse la requête courante passer avant de précharger la suivante.
@@ -26,34 +28,191 @@ export default function LyricsView({ large }: Props) {
     return () => window.clearTimeout(t)
   }, [nextId])
 
+  // Le panneau de recherche se referme au changement de morceau.
+  useEffect(() => setSearchFor(null), [trackId])
+
   if (!trackId) return <Message large={large} icon={<Music2 size={28} />} title="Aucune lecture" />
+  if (searchFor !== null)
+    return (
+      <ManualSearch
+        key={trackId}
+        trackId={trackId}
+        large={large}
+        onClose={() => setSearchFor(null)}
+        onChosen={(l) => {
+          replace(l)
+          setSearchFor(null)
+        }}
+      />
+    )
   if (loading) return <Skeleton large={large} />
+  const openSearch = () => setSearchFor("")
   if (!lyrics)
     return (
-      <Message large={large} icon={<Mic2 size={28} />} title="Aucune parole trouvée" hint="Ni fichier .lrc, ni tag, ni résultat en ligne pour ce titre.">
-        <RefreshButton large={large} onClick={refresh} label="Relancer la recherche" />
+      <Message large={large} icon={<Mic2 size={28} />} title="Aucune parole trouvée" hint="Aucune source (fichier .lrc, tags, LRCLIB, NetEase, Genius) n'a de résultat fiable pour ce titre.">
+        <div className="flex flex-wrap justify-center gap-2">
+          <RefreshButton large={large} onClick={openSearch} label="Chercher manuellement" icon={<Search size={14} />} />
+          <RefreshButton large={large} onClick={refresh} label="Relancer" />
+        </div>
       </Message>
     )
-  if (lyrics.kind === "instrumental") return <Message large={large} icon={<Music2 size={28} />} title="Morceau instrumental" hint={`Source : ${lyrics.source}`} />
-  if (lyrics.kind === "plain") return <PlainLyrics key={trackId} text={lyrics.text} source={lyrics.source} large={large} onRefresh={refresh} />
-  return <SyncedLyrics key={trackId} lines={lyrics.lines} source={lyrics.source} large={large} onRefresh={refresh} />
+  if (lyrics.kind === "instrumental")
+    return (
+      <Message large={large} icon={<Music2 size={28} />} title="Morceau instrumental" hint={`Source : ${lyrics.source}`}>
+        <RefreshButton large={large} onClick={openSearch} label="Chercher des paroles" icon={<Search size={14} />} />
+      </Message>
+    )
+  if (lyrics.kind === "plain") return <PlainLyrics key={trackId} text={lyrics.text} source={lyrics.source} large={large} onRefresh={refresh} onSearch={openSearch} />
+  return <SyncedLyrics key={trackId} lines={lyrics.lines} source={lyrics.source} approximate={!!lyrics.approximate} large={large} onRefresh={refresh} onSearch={openSearch} />
+}
+
+// ---------- recherche manuelle ----------
+
+const fmtDuration = (s: number) => (s > 0 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}` : "")
+
+function ManualSearch({ trackId, large, onClose, onChosen }: { trackId: string; large?: boolean; onClose: () => void; onChosen: (l: Lyrics) => void }) {
+  const duration = usePlayer((s) => s.durationMs) / 1000
+  const [query, setQuery] = useState("")
+  const [results, setResults] = useState<LyricsResult[] | null>(null)
+  const [busy, setBusy] = useState(true)
+  const [preview, setPreview] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const run = (q?: string) => {
+    setBusy(true)
+    setPreview(null)
+    backend.lyrics
+      .search(trackId, q)
+      .then((r) => {
+        setQuery((prev) => (q === undefined ? r.query : prev))
+        setResults(r.results)
+      })
+      .catch(() => setResults([]))
+      .finally(() => setBusy(false))
+  }
+  // Première recherche avec la requête déduite du morceau.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => run(), [trackId])
+
+  const choose = (r: LyricsResult) => {
+    setSaving(true)
+    backend.lyrics
+      .choose(trackId, r)
+      .then((l) => l && onChosen(l))
+      .finally(() => setSaving(false))
+  }
+
+  const muted = large ? "text-white/55" : "text-lo"
+  const card = large ? "bg-white/8 hover:bg-white/14" : "bg-[color-mix(in_srgb,var(--text-hi)_6%,transparent)] hover:bg-[color-mix(in_srgb,var(--text-hi)_11%,transparent)]"
+
+  return (
+    <div className={cn("flex h-full flex-col", large ? "px-2 pt-[8vh] text-white" : "px-5 pt-5 text-hi")}>
+      <div className="mb-3 flex items-center justify-between">
+        <div className={cn("font-bold", large ? "text-xl" : "text-base")}>Rechercher des paroles</div>
+        <button onClick={onClose} className={cn("rounded-full p-1.5", large ? "hover:bg-white/10" : "hover:bg-[color-mix(in_srgb,var(--text-hi)_10%,transparent)]")} aria-label="Fermer la recherche">
+          <X size={18} />
+        </button>
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          run(query)
+        }}
+        className="mb-3 flex gap-2"
+      >
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Artiste titre"
+          className={cn("min-w-0 flex-1 rounded-full border px-4 py-2 text-sm outline-none", large ? "border-white/20 bg-white/10 placeholder:text-white/40" : "border-[var(--glass-border)] bg-transparent")}
+        />
+        <button type="submit" className={cn("flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold", large ? "bg-white text-black" : "bg-[var(--text-hi)] text-[var(--bg-0)]")}>
+          <Search size={14} /> Chercher
+        </button>
+      </form>
+      <div className="lyrics-scroll min-h-0 flex-1 overflow-y-auto pb-10">
+        {busy && <div className={cn("py-8 text-center text-sm", muted)}>Recherche sur LRCLIB, NetEase et Genius…</div>}
+        {!busy && results?.length === 0 && <div className={cn("py-8 text-center text-sm", muted)}>Aucun résultat. Essayez « artiste titre » sans mots superflus.</div>}
+        {!busy &&
+          results?.map((r, i) => {
+            const diff = r.durationS > 0 && duration > 0 ? Math.abs(r.durationS - duration) : null
+            const exact = diff !== null && diff <= Math.max(3, duration * 0.02)
+            return (
+              <div key={i} className={cn("mb-2 rounded-xl p-3 transition-colors", card)}>
+                <button className="block w-full text-left" onClick={() => setPreview(preview === i ? null : i)}>
+                  <div className="truncate font-semibold">{r.title}</div>
+                  <div className={cn("truncate text-sm", muted)}>
+                    {r.artist}
+                    {r.album ? ` · ${r.album}` : ""}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                    <Badge large={large} strong={r.synced}>{r.synced ? "Synchronisées" : "Texte seul"}</Badge>
+                    <Badge large={large}>{r.source}</Badge>
+                    {r.durationS > 0 && (
+                      <Badge large={large} strong={exact}>
+                        {fmtDuration(r.durationS)}
+                        {exact ? " · même durée" : diff !== null ? ` · ${diff > 0 ? "écart " + Math.round(diff) + " s" : ""}` : ""}
+                      </Badge>
+                    )}
+                  </div>
+                </button>
+                {preview === i && (
+                  <div className="mt-3">
+                    <div className={cn("max-h-48 overflow-y-auto whitespace-pre-line rounded-lg p-2 text-sm", large ? "bg-black/20 text-white/80" : "bg-[color-mix(in_srgb,var(--text-hi)_5%,transparent)] text-mid")}>
+                      {r.text.replace(/\[\d{1,3}[:.,]\d{1,2}(?:[.:,]\d{1,3})?\]/g, "").replace(/<\d{1,3}:\d{1,2}(?:[.:,]\d{1,3})?>/g, "").trim().slice(0, 1200)}
+                    </div>
+                    <button
+                      disabled={saving}
+                      onClick={() => choose(r)}
+                      className={cn("mt-2 flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50", large ? "bg-white text-black" : "bg-[var(--text-hi)] text-[var(--bg-0)]")}
+                    >
+                      <Check size={14} /> Utiliser ces paroles
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+      </div>
+    </div>
+  )
+}
+
+function Badge({ children, strong, large }: { children: React.ReactNode; strong?: boolean; large?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-2 py-0.5",
+        strong
+          ? large
+            ? "bg-white/85 text-black"
+            : "bg-[var(--text-hi)] text-[var(--bg-0)]"
+          : large
+            ? "bg-white/12 text-white/70"
+            : "bg-[color-mix(in_srgb,var(--text-hi)_9%,transparent)] text-mid",
+      )}
+    >
+      {children}
+    </span>
+  )
 }
 
 // ---------- synchronisées ----------
 
-/** Index de la ligne courante, calculé à 60 i/s en interpolant la position reçue toutes les 200 ms. */
-function useActiveLine(lines: LyricsLine[]) {
+/** Index de la ligne courante, interpolé entre les positions du moteur audio. */
+function useActiveLine(lines: LyricsLine[], offsetMs: number) {
   const [index, setIndex] = useState(-1)
   useEffect(() => {
     let anchor = { pos: usePlayer.getState().positionMs, at: performance.now() }
     const unsub = usePlayer.subscribe((s, prev) => {
       if (s.positionMs !== prev.positionMs || s.status !== prev.status) anchor = { pos: s.positionMs, at: performance.now() }
     })
-    let raf = 0
+    let timer = 0
     const tick = () => {
       const s = usePlayer.getState()
       const pos = s.status === "playing" ? anchor.pos + Math.min(performance.now() - anchor.at, 1000) : s.positionMs
-      const t = pos + LEAD_MS
+      const t = pos + LEAD_MS + offsetMs
       // Recherche dichotomique de la dernière ligne commencée.
       let lo = 0
       let hi = lines.length - 1
@@ -65,21 +224,23 @@ function useActiveLine(lines: LyricsLine[]) {
           lo = mid + 1
         } else hi = mid - 1
       }
-      setIndex(found)
-      raf = requestAnimationFrame(tick)
+      setIndex((previous) => previous === found ? previous : found)
+      timer = window.setTimeout(tick, 50)
     }
     tick()
     return () => {
-      cancelAnimationFrame(raf)
+      window.clearTimeout(timer)
       unsub()
     }
-  }, [lines])
+  }, [lines, offsetMs])
   return index
 }
 
-function SyncedLyrics({ lines, source, large, onRefresh }: { lines: LyricsLine[]; source: string; large?: boolean; onRefresh: () => void }) {
+function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }: { lines: LyricsLine[]; source: string; approximate: boolean; large?: boolean; onRefresh: () => void; onSearch: () => void }) {
   const seek = usePlayer((s) => s.seek)
-  const active = useActiveLine(lines)
+  const trackId = usePlayer((s) => s.currentTrackId)
+  const [offsetMs, setOffsetMs] = useState(() => Number(localStorage.getItem(`aura:lyric-offset:${trackId}`)) || 0)
+  const active = useActiveLine(lines, offsetMs)
   const scroller = useRef<HTMLDivElement>(null)
   const refs = useRef<(HTMLElement | null)[]>([])
   const introRef = useRef<HTMLDivElement>(null)
@@ -123,6 +284,11 @@ function SyncedLyrics({ lines, source, large, onRefresh }: { lines: LyricsLine[]
     window.clearTimeout(resumeTimer.current)
     setFollow(true)
   }
+  const adjustOffset = (delta: number) => {
+    const next = Math.max(-10000, Math.min(10000, offsetMs + delta))
+    setOffsetMs(next)
+    localStorage.setItem(`aura:lyric-offset:${trackId}`, String(next))
+  }
 
   const colorFor = (state: "active" | "past" | "next") =>
     large
@@ -147,6 +313,11 @@ function SyncedLyrics({ lines, source, large, onRefresh }: { lines: LyricsLine[]
         className={cn("lyrics-scroll relative h-full overflow-y-auto", large ? "px-2" : "px-5")}
       >
         <div className={cn("flex flex-col", large ? "gap-6 pb-[45vh] pt-[22vh]" : "gap-4 pb-[60%] pt-[30%]")}>
+          {approximate && (
+            <div className={cn("self-start rounded-full px-3 py-1 text-xs font-semibold", large ? "bg-white/15 text-white/80" : "bg-[color-mix(in_srgb,var(--text-hi)_10%,transparent)] text-mid")}>
+              Synchro d'une autre version : ajustez le décalage en bas si besoin
+            </div>
+          )}
           {hasIntro && (
             <div ref={introRef}>
               <Dots on={active === -1} large={large} />
@@ -165,7 +336,7 @@ function SyncedLyrics({ lines, source, large, onRefresh }: { lines: LyricsLine[]
                 key={i}
                 ref={(el) => void (refs.current[i] = el)}
                 onClick={() => {
-                  seek(line.timeMs)
+                  seek(Math.max(0, line.timeMs - offsetMs))
                   resync()
                 }}
                 className={cn(
@@ -179,7 +350,13 @@ function SyncedLyrics({ lines, source, large, onRefresh }: { lines: LyricsLine[]
               </button>
             )
           })}
-          <Footer source={source} large={large} onRefresh={onRefresh} />
+          <div className={cn("mt-7 flex flex-wrap items-center gap-2 text-xs", large ? "text-white/60" : "text-mid")}>
+            <span>Décalage {offsetMs > 0 ? "+" : ""}{(offsetMs / 1000).toFixed(1)} s</span>
+            <button onClick={() => adjustOffset(-500)} className="rounded-md border border-[var(--glass-border)] px-2 py-1" aria-label="Retarder les paroles de 0,5 seconde">− 0,5 s</button>
+            <button onClick={() => adjustOffset(500)} className="rounded-md border border-[var(--glass-border)] px-2 py-1" aria-label="Avancer les paroles de 0,5 seconde">+ 0,5 s</button>
+            {offsetMs !== 0 && <button onClick={() => adjustOffset(-offsetMs)} className="rounded-md px-2 py-1 underline">Réinitialiser</button>}
+          </div>
+          <Footer source={source} large={large} onRefresh={onRefresh} onSearch={onSearch} />
         </div>
       </div>
 
@@ -215,7 +392,7 @@ function Dots({ on, large }: { on: boolean; large?: boolean }) {
 
 // ---------- texte brut / états ----------
 
-function PlainLyrics({ text, source, large, onRefresh }: { text: string; source: string; large?: boolean; onRefresh: () => void }) {
+function PlainLyrics({ text, source, large, onRefresh, onSearch }: { text: string; source: string; large?: boolean; onRefresh: () => void; onSearch: () => void }) {
   return (
     <div className={cn("lyrics-scroll h-full overflow-y-auto", large ? "px-2" : "px-5")}>
       <div className={cn(large ? "pb-[30vh] pt-[12vh]" : "pb-20 pt-10")}>
@@ -227,30 +404,33 @@ function PlainLyrics({ text, source, large, onRefresh }: { text: string; source:
         >
           {text}
         </div>
-        <Footer source={source} large={large} onRefresh={onRefresh} />
+        <Footer source={source} large={large} onRefresh={onRefresh} onSearch={onSearch} />
       </div>
     </div>
   )
 }
 
-function Footer({ source, large, onRefresh }: { source: string; large?: boolean; onRefresh: () => void }) {
+function Footer({ source, large, onRefresh, onSearch }: { source: string; large?: boolean; onRefresh: () => void; onSearch: () => void }) {
   return (
     <div className={cn("mt-10 flex items-center gap-3 text-xs", large ? "text-white/50" : "text-lo")}>
       <span>Paroles fournies par {source}</span>
       <button onClick={onRefresh} className={cn("flex items-center gap-1 rounded-full px-2 py-1", large ? "hover:bg-white/10 hover:text-white" : "hover:text-hi")} aria-label="Rechercher à nouveau">
         <RotateCw size={12} /> Actualiser
       </button>
+      <button onClick={onSearch} className={cn("flex items-center gap-1 rounded-full px-2 py-1", large ? "hover:bg-white/10 hover:text-white" : "hover:text-hi")}>
+        <Search size={12} /> Mauvaises paroles ?
+      </button>
     </div>
   )
 }
 
-function RefreshButton({ onClick, label, large }: { onClick: () => void; label: string; large?: boolean }) {
+function RefreshButton({ onClick, label, large, icon }: { onClick: () => void; label: string; large?: boolean; icon?: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
       className={cn("mt-4 flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold", large ? "bg-white/15 text-white hover:bg-white/25" : "bg-[color-mix(in_srgb,var(--text-hi)_10%,transparent)] text-hi hover:bg-[color-mix(in_srgb,var(--text-hi)_16%,transparent)]")}
     >
-      <RotateCw size={14} /> {label}
+      {icon ?? <RotateCw size={14} />} {label}
     </button>
   )
 }

@@ -105,10 +105,26 @@ export interface LyricsLine {
 }
 
 export type Lyrics =
-  | { kind: "synced"; lines: LyricsLine[]; source: string }
+  | { kind: "synced"; lines: LyricsLine[]; source: string; approximate?: boolean }
   | { kind: "plain"; text: string; source: string }
   | { kind: "instrumental"; source: string }
   | null
+
+/** Résultat de la recherche manuelle de paroles. */
+export interface LyricsResult {
+  title: string
+  artist: string
+  album: string
+  durationS: number
+  source: string
+  synced: boolean
+  text: string
+}
+
+export interface LyricsSearch {
+  query: string
+  results: LyricsResult[]
+}
 
 export interface EqBand {
   freq: number // Hz

@@ -54,5 +54,15 @@ export function useLyrics(trackId: string | null) {
     load(trackId, true).then((l) => setState((s) => (s.id === trackId ? { id: trackId, lyrics: l, loading: false } : s)))
   }, [trackId])
 
-  return { lyrics: state.id === trackId ? state.lyrics : null, loading: state.id === trackId ? state.loading : true, refresh }
+  /** Remplace les paroles (choix manuel). */
+  const replace = useCallback(
+    (l: Lyrics) => {
+      if (!trackId) return
+      cache.set(trackId, l)
+      setState({ id: trackId, lyrics: l, loading: false })
+    },
+    [trackId],
+  )
+
+  return { lyrics: state.id === trackId ? state.lyrics : null, loading: state.id === trackId ? state.loading : true, refresh, replace }
 }

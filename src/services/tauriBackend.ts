@@ -19,6 +19,8 @@ import type {
   FolderNode,
   LibraryStats,
   Lyrics,
+  LyricsResult,
+  LyricsSearch,
   OutputStatus,
   PlayerState,
   Playlist,
@@ -577,6 +579,12 @@ export const tauriBackend: MusicBackend = {
   lyrics: {
     async get(trackId, force = false) {
       return (await invoke<Lyrics>("lyrics_get", { trackId, force })) ?? null
+    },
+    async search(trackId, query) {
+      return (await invoke<LyricsSearch | null>("lyrics_search", { trackId, query: query ?? null })) ?? { query: query ?? "", results: [] }
+    },
+    async choose(trackId, r) {
+      return (await invoke<Lyrics>("lyrics_choose", { trackId, text: r.text, source: r.source, durationS: r.durationS })) ?? null
     },
   },
 

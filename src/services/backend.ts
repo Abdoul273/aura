@@ -10,6 +10,8 @@ import type {
   FolderNode,
   LibraryStats,
   Lyrics,
+  LyricsResult,
+  LyricsSearch,
   OutputStatus,
   Paging,
   PlayerState,
@@ -93,6 +95,10 @@ export interface MusicBackend {
   lyrics: {
     /** `force` ignore le cache et relance la recherche en ligne. */
     get(trackId: string, force?: boolean): Promise<Lyrics>
+    /** Recherche manuelle (requête déduite du morceau si absente). */
+    search(trackId: string, query?: string): Promise<LyricsSearch>
+    /** Adopte un résultat de recherche comme paroles du morceau. */
+    choose(trackId: string, result: LyricsResult): Promise<Lyrics>
   }
   artwork: {
     getUrl(albumId: string, size: number): string

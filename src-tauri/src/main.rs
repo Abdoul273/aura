@@ -74,6 +74,8 @@ fn main() {
             favorites_list,
             stats_plays,
             lyrics_get,
+            lyrics_search,
+            lyrics_choose,
             player_state,
             player_play,
             player_pause,

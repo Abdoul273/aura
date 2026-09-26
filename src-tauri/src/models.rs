@@ -219,9 +219,30 @@ pub struct LyricsLine {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Lyrics {
-    Synced { lines: Vec<LyricsLine>, source: String },
+    /// `approximate` : paroles d'une version de durée différente (clip…), le décalage peut être à régler.
+    Synced { lines: Vec<LyricsLine>, source: String, approximate: bool },
     Plain { text: String, source: String },
     Instrumental { source: String },
+}
+
+/// Résultat de la recherche manuelle de paroles.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsResult {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration_s: f64,
+    pub source: String,
+    pub synced: bool,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsSearch {
+    pub query: String,
+    pub results: Vec<LyricsResult>,
 }
 
 /// Agrégats d'écoute ; le frontend les complète avec les données de la bibliothèque.

@@ -103,6 +103,18 @@ pub async fn lyrics_get(st: S<'_>, track_id: String, force: Option<bool>) -> Res
     tauri::async_runtime::spawn_blocking(move || lyrics::get(&st.db, &st.lyrics_dir, &track_id, force)).await.map_err(err)
 }
 
+#[tauri::command]
+pub async fn lyrics_search(st: S<'_>, track_id: String, query: Option<String>) -> Res<Option<LyricsSearch>> {
+    let st = st.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || lyrics::search(&st.db, &track_id, query)).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn lyrics_choose(st: S<'_>, track_id: String, text: String, source: String, duration_s: f64) -> Res<Option<Lyrics>> {
+    let st = st.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || lyrics::choose(&st.db, &st.lyrics_dir, &track_id, &text, &source, duration_s)).await.map_err(err)
+}
+
 // ---------- lecture ----------
 
 #[tauri::command]
