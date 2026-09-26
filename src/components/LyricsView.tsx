@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Mic2, Music2, RotateCw, LocateFixed, Search, X, Check } from "lucide-react"
+import { Mic2, Music2, RotateCw, LocateFixed, Search, X, Check, Crosshair, Minus, Plus } from "lucide-react"
+import { create } from "zustand"
 import { backend } from "../services"
 import { usePlayer } from "../store/playerStore"
 import { prefetchLyrics, useLyrics } from "../hooks/useLyrics"
@@ -200,39 +201,176 @@ function Badge({ children, strong, large }: { children: React.ReactNode; strong?
 
 // ---------- synchronisées ----------
 
-/** Position de lecture interpolée entre les mises à jour du moteur audio (lecture à la demande, sans rendu). */
-function usePlaybackClock(offsetMs: number) {
+// ----- calage (global + par section), partagé entre le tiroir et le plein écran -----
+
+/** `off` = temps des paroles − temps audio, à partir de la ligne `line` (ou global). */
+interface SyncState {
+  global: number
+  anchors: { line: number; off: number }[]
+}
+const EMPTY_SYNC: SyncState = { global: 0, anchors: [] }
+
+const useLyricSync = create<{ byTrack: Record<string, SyncState>; set: (id: string, s: SyncState) => void }>((set) => ({
+  byTrack: {},
+  set: (id, st) => {
+    try {
+      localStorage.setItem(`aura:lyric-sync:${id}`, JSON.stringify(st))
+      localStorage.removeItem(`aura:lyric-offset:${id}`)
+    } catch {
+      /* stockage indisponible : le calage reste pour la session */
+    }
+    set((s) => ({ byTrack: { ...s.byTrack, [id]: st } }))
+  },
+}))
+
+function readSync(id: string): SyncState {
+  try {
+    const raw = localStorage.getItem(`aura:lyric-sync:${id}`)
+    if (raw) {
+      const v = JSON.parse(raw) as SyncState
+      if (typeof v.global === "number" && Array.isArray(v.anchors)) return v
+    }
+    const old = Number(localStorage.getItem(`aura:lyric-offset:${id}`))
+    if (old) return { global: old, anchors: [] }
+  } catch {
+    /* ignoré */
+  }
+  return EMPTY_SYNC
+}
+
+function useSync(trackId: string | null) {
+  const stored = useLyricSync((s) => (trackId ? s.byTrack[trackId] : undefined))
+  const sync = useMemo(() => stored ?? (trackId ? readSync(trackId) : EMPTY_SYNC), [stored, trackId])
+  const save = useCallback((st: SyncState) => trackId && useLyricSync.getState().set(trackId, st), [trackId])
+  return [sync, save] as const
+}
+
+const offsetAt = (sync: SyncState, line: number) => {
+  let off = sync.global
+  for (const a of sync.anchors) if (a.line <= line) off = a.off
+  return off
+}
+
+// ----- chronologie : quand chaque ligne et chaque mot sont réellement chantés -----
+
+interface TimedWord {
+  text: string
+  start: number
+  end: number
+}
+interface TimedLine {
+  start: number
+  /** Fin estimée (ou exacte) du chant : le balayage karaoké s'y termine. */
+  end: number
+  words: TimedWord[]
+}
+
+const VOWELS = /[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýÿœɑəɛɔ]+/gi
+const CJK = /[぀-ヿ㐀-鿿가-힯]/g
+
+/** Nombre approximatif de syllabes (groupes de voyelles, un caractère par syllabe en CJK). */
+function syllables(word: string) {
+  const cjk = word.match(CJK)?.length ?? 0
+  const latin = word.replace(CJK, "").match(VOWELS)?.length ?? 0
+  const n = cjk + latin
+  return n > 0 ? n : /[\p{L}\p{N}]/u.test(word) ? 1 : 0
+}
+
+const splitWords = (text: string) => text.split(/(?<=\s)(?=\S)/)
+
+/**
+ * Débit chanté du morceau (syllabes/ms), déduit des paroles : sur les lignes enchaînées, le chanteur remplit
+ * presque tout l'intervalle ; on retient donc un débit haut (75e centile) pour ne pas étaler une ligne sur la
+ * respiration qui la suit.
+ */
+function singingRate(lines: LyricsLine[]) {
+  const rates: number[] = []
+  lines.forEach((l, i) => {
+    const next = lines[i + 1]
+    if (!l.text || !next) return
+    const gap = next.timeMs - l.timeMs
+    if (gap < 700 || gap > 10000) return
+    const syl = splitWords(l.text).reduce((n, w) => n + syllables(w), 0)
+    if (syl > 0) rates.push(syl / gap)
+  })
+  if (rates.length < 3) return 4.2 / 1000
+  rates.sort((a, b) => a - b)
+  const r = rates[Math.floor(rates.length * 0.75)]
+  return Math.max(2.6 / 1000, Math.min(9 / 1000, r))
+}
+
+function buildTimeline(lines: LyricsLine[], sync: SyncState): TimedLine[] {
+  const rate = singingRate(lines)
+  let prev = -Infinity
+  const starts = lines.map((l, i) => {
+    // Temps audio de la ligne ; ordre préservé même si deux sections se chevauchent après calage.
+    const t = Math.max(prev + 1, l.timeMs - offsetAt(sync, i))
+    prev = t
+    return t
+  })
+  return lines.map((l, i) => {
+    const shift = starts[i] - l.timeMs
+    const nextStart = starts[i + 1] ?? starts[i] + 8000
+    const room = Math.max(250, nextStart - starts[i] - 90)
+    if (l.words?.length) {
+      const ws = l.words.map((w) => ({ text: w.text, start: w.timeMs + shift }))
+      const lastEnd = l.endMs !== undefined ? l.endMs + shift : ws[ws.length - 1].start + Math.max(200, syllables(ws[ws.length - 1].text) / rate)
+      const words = ws.map((w, k) => ({ ...w, end: Math.max(w.start + 60, ws[k + 1]?.start ?? lastEnd) }))
+      return { start: starts[i], end: Math.min(lastEnd, nextStart), words }
+    }
+    const parts = splitWords(l.text)
+    const syl = parts.map((w) => syllables(w))
+    const total = syl.reduce((a, b) => a + b, 0) || 1
+    const dur = Math.max(350, Math.min(room, total / rate))
+    let acc = 0
+    const words = parts.map((text, k) => {
+      const start = starts[i] + (acc / total) * dur
+      acc += syl[k]
+      return { text, start, end: starts[i] + (acc / total) * dur }
+    })
+    return { start: starts[i], end: starts[i] + dur, words }
+  })
+}
+
+// ----- horloge -----
+
+/** Position audio interpolée entre les mises à jour du moteur (~5/s), lissée pour éviter les micro-sauts. */
+function usePlaybackClock() {
   const anchor = useRef({ pos: usePlayer.getState().positionMs, at: performance.now() })
   useEffect(
     () =>
       usePlayer.subscribe((s, prev) => {
-        if (s.positionMs !== prev.positionMs || s.status !== prev.status) anchor.current = { pos: s.positionMs, at: performance.now() }
+        if (s.positionMs === prev.positionMs && s.status === prev.status) return
+        const t = performance.now()
+        const a = anchor.current
+        const predicted = a.pos + (prev.status === "playing" ? t - a.at : 0)
+        const err = s.positionMs - predicted
+        // Petite dérive : correction progressive ; seek, pause ou gros écart : recalage immédiat.
+        const pos = s.status === "playing" && prev.status === "playing" && Math.abs(err) < 120 ? predicted + err * 0.35 : s.positionMs
+        anchor.current = { pos, at: t }
       }),
     [],
   )
-  const offset = useRef(offsetMs)
-  offset.current = offsetMs
   return useCallback(() => {
     const s = usePlayer.getState()
     const a = anchor.current
-    const pos = s.status === "playing" ? a.pos + Math.min(performance.now() - a.at, 1000) : s.positionMs
-    return pos + LEAD_MS + offset.current
+    return s.status === "playing" ? a.pos + Math.min(performance.now() - a.at, 1500) + LEAD_MS : s.positionMs + LEAD_MS
   }, [])
 }
 
 /** Index de la dernière ligne commencée. */
-function useActiveLine(lines: LyricsLine[], now: () => number) {
+function useActiveLine(timeline: TimedLine[], now: () => number) {
   const [index, setIndex] = useState(-1)
   useEffect(() => {
     let raf = 0
     const tick = () => {
       const t = now()
       let lo = 0
-      let hi = lines.length - 1
+      let hi = timeline.length - 1
       let found = -1
       while (lo <= hi) {
         const mid = (lo + hi) >> 1
-        if (lines[mid].timeMs <= t) {
+        if (timeline[mid].start <= t) {
           found = mid
           lo = mid + 1
         } else hi = mid - 1
@@ -242,7 +380,7 @@ function useActiveLine(lines: LyricsLine[], now: () => number) {
     }
     tick()
     return () => cancelAnimationFrame(raf)
-  }, [lines, now])
+  }, [timeline, now])
   return index
 }
 
@@ -268,69 +406,69 @@ function useSmoothScroll() {
   return { to, cancel }
 }
 
-/** Ligne active : balayage karaoké mot à mot, réparti selon la longueur des mots. */
-function KaraokeLine({ text, start, end, now, large }: { text: string; start: number; end: number; now: () => number; large?: boolean }) {
-  const words = useMemo(() => text.split(/(\s+)/).filter(Boolean), [text])
+// Le balayage part un poil avant l'attaque : la syllabe s'allume au moment où on l'entend, pas après.
+const SWEEP_LEAD_MS = 70
+
+/** Ligne active : balayage karaoké mot à mot, calé sur la chronologie (mots horodatés ou estimés). */
+function KaraokeLine({ line, now, large }: { line: TimedLine; now: () => number; large?: boolean }) {
   const spans = useRef<(HTMLSpanElement | null)[]>([])
   useEffect(() => {
-    const weights = words.map((w) => (/^\s+$/.test(w) ? 0 : w.length + 2))
-    const total = weights.reduce((a, b) => a + b, 0) || 1
-    // Durée chantée : bornée par la ligne suivante, estimée d'après la longueur du texte.
-    const dur = Math.max(400, Math.min(end - start - 150, Math.max(1100, total * 85)))
     let raf = 0
     const tick = () => {
-      const p = Math.max(0, Math.min(1, (now() - start) / dur)) * total
-      let acc = 0
-      words.forEach((_, i) => {
+      const t = now() + SWEEP_LEAD_MS
+      line.words.forEach((w, i) => {
         const el = spans.current[i]
-        const w = weights[i]
-        if (!el || !w) return
-        const f = Math.max(0, Math.min(1, (p - acc) / w))
-        acc += w
+        if (!el) return
+        const f = Math.max(0, Math.min(1, (t - w.start) / Math.max(1, w.end - w.start)))
         el.style.setProperty("--f", `${(f * 124 - 12).toFixed(1)}%`)
-        el.style.transform = `translateY(${(-2 * Math.sin(f * Math.PI)).toFixed(2)}px)`
+        el.style.transform = `translateY(${(-2.5 * Math.sin(Math.min(1, f * 1.4) * Math.PI)).toFixed(2)}px)`
       })
       raf = requestAnimationFrame(tick)
     }
     tick()
     return () => cancelAnimationFrame(raf)
-  }, [words, start, end, now])
+  }, [line, now])
   const lit = large ? "#fff" : "var(--text-hi)"
   const dim = large ? "rgba(255,255,255,.38)" : "color-mix(in srgb, var(--text-hi) 38%, transparent)"
   return (
     <>
-      {words.map((w, i) =>
-        /^\s+$/.test(w) ? (
-          w
-        ) : (
-          <span
-            key={i}
-            ref={(el) => void (spans.current[i] = el)}
-            className="inline-block"
-            style={{
-              ["--f" as string]: "-12%",
-              backgroundImage: `linear-gradient(90deg, ${lit} calc(var(--f) - 12%), ${dim} calc(var(--f) + 12%))`,
-              backgroundSize: "100% 100%",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            {w}
+      {line.words.map((w, i) => {
+        const trailing = w.text.match(/\s+$/)?.[0] ?? ""
+        return (
+          <span key={i}>
+            <span
+              ref={(el) => void (spans.current[i] = el)}
+              className="inline-block"
+              style={{
+                ["--f" as string]: "-12%",
+                backgroundImage: `linear-gradient(90deg, ${lit} calc(var(--f) - 12%), ${dim} calc(var(--f) + 12%))`,
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+                WebkitTextFillColor: "transparent",
+              }}
+            >
+              {w.text.trimEnd()}
+            </span>
+            {trailing}
           </span>
-        ),
-      )}
+        )
+      })}
     </>
   )
 }
 
+// Un seul composant monté (tiroir ou plein écran) répond aux raccourcis de calage : le dernier arrivé.
+const keyOwners: number[] = []
+let keyOwnerSeq = 0
+
 function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }: { lines: LyricsLine[]; source: string; approximate: boolean; large?: boolean; onRefresh: () => void; onSearch: () => void }) {
   const seek = usePlayer((s) => s.seek)
   const trackId = usePlayer((s) => s.currentTrackId)
-  const [offsetMs, setOffsetMs] = useState(() => Number(localStorage.getItem(`aura:lyric-offset:${trackId}`)) || 0)
-  const now = usePlaybackClock(offsetMs)
-  const active = useActiveLine(lines, now)
+  const [sync, saveSync] = useSync(trackId)
+  const timeline = useMemo(() => buildTimeline(lines, sync), [lines, sync])
+  const now = usePlaybackClock()
+  const active = useActiveLine(timeline, now)
   const smooth = useSmoothScroll()
   const scroller = useRef<HTMLDivElement>(null)
   const refs = useRef<(HTMLElement | null)[]>([])
@@ -382,11 +520,53 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
     window.clearTimeout(resumeTimer.current)
     setFollow(true)
   }
-  const adjustOffset = (delta: number) => {
-    const next = Math.max(-10000, Math.min(10000, offsetMs + delta))
-    setOffsetMs(next)
-    localStorage.setItem(`aura:lyric-offset:${trackId}`, String(next))
+  const clampOff = (v: number) => Math.round(Math.max(-600000, Math.min(600000, v)))
+  /** Décale la section en cours (ou tout le morceau s'il n'y a pas de section). */
+  const nudge = (delta: number) => {
+    const line = Math.max(0, active)
+    const idx = sync.anchors.reduce((k, a, j) => (a.line <= line ? j : k), -1)
+    if (idx < 0) saveSync({ ...sync, global: clampOff(sync.global + delta) })
+    else saveSync({ ...sync, anchors: sync.anchors.map((a, j) => (j === idx ? { ...a, off: clampOff(a.off + delta) } : a)) })
   }
+  /**
+   * « Caler » : la ligne dont le début est le plus proche de l'instant présent démarre maintenant.
+   * Premier calage = tout le morceau ; les suivants créent une section à partir de cette ligne.
+   */
+  const tap = () => {
+    const t = now()
+    const candidates = [active, active + 1].filter((i) => i >= 0 && i < lines.length && lines[i].text)
+    if (!candidates.length) return
+    const j = candidates.reduce((best, i) => (Math.abs(timeline[i].start - t) < Math.abs(timeline[best].start - t) ? i : best))
+    const off = clampOff(lines[j].timeMs - t)
+    if (!sync.anchors.length && sync.global === 0) saveSync({ global: off, anchors: [] })
+    else saveSync({ ...sync, anchors: [...sync.anchors.filter((a) => a.line !== j), { line: j, off }].sort((a, b) => a.line - b.line) })
+    setFlash(j)
+    window.setTimeout(() => setFlash((f) => (f === j ? null : f)), 700)
+  }
+  const [flash, setFlash] = useState<number | null>(null)
+  const synced = sync.global !== 0 || sync.anchors.length > 0
+  const sectionOff = offsetAt(sync, Math.max(0, active))
+
+  // Raccourcis : T = caler, [ et ] = ∓ 0,1 s.
+  const handlers = useRef({ tap, nudge })
+  handlers.current = { tap, nudge }
+  useEffect(() => {
+    const id = ++keyOwnerSeq
+    keyOwners.push(id)
+    const onKey = (e: KeyboardEvent) => {
+      if (keyOwners[keyOwners.length - 1] !== id || e.ctrlKey || e.metaKey || e.altKey) return
+      const el = document.activeElement
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || (el as HTMLElement).isContentEditable)) return
+      if (e.key === "t" || e.key === "T") handlers.current.tap()
+      else if (e.key === "[") handlers.current.nudge(-100)
+      else if (e.key === "]") handlers.current.nudge(100)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      keyOwners.splice(keyOwners.indexOf(id), 1)
+    }
+  }, [])
 
   const colorFor = (state: "active" | "past" | "next") =>
     large
@@ -402,7 +582,7 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
           : "color-mix(in srgb, var(--text-hi) 32%, transparent)"
 
   return (
-    <div className="relative h-full">
+    <div className="group/lyrics relative h-full">
       <div
         ref={scroller}
         onWheel={userScrolled}
@@ -413,7 +593,7 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
         <div className={cn("flex flex-col", large ? "gap-6 pb-[45vh] pt-[22vh]" : "gap-4 pb-[60%] pt-[30%]")}>
           {approximate && (
             <div className={cn("self-start rounded-full px-3 py-1 text-xs font-semibold", large ? "bg-white/15 text-white/80" : "bg-[color-mix(in_srgb,var(--text-hi)_10%,transparent)] text-mid")}>
-              Synchro d'une autre version : ajustez le décalage en bas si besoin
+              Synchro d'une autre version : appuyez sur « Caler » (T) au début d'une ligne si besoin
             </div>
           )}
           {hasIntro && (
@@ -435,7 +615,7 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
                 key={i}
                 ref={(el) => void (refs.current[i] = el)}
                 onClick={() => {
-                  seek(Math.max(0, line.timeMs - offsetMs))
+                  seek(Math.max(0, timeline[i].start))
                   resync()
                 }}
                 className={cn(
@@ -449,28 +629,24 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
                   ["--hover" as string]: state === "active" ? colorFor(state) : large ? "rgba(255,255,255,.85)" : "var(--text-hi)",
                   transform: state === "active" ? "scale(1)" : `scale(${large ? 0.94 : 0.96})`,
                   opacity: state === "active" ? 1 : follow ? Math.max(large ? 0.35 : 0.5, 1 - Math.abs(dist) * 0.14) : 1,
-                  textShadow: state === "active" && large ? "0 0 28px rgba(255,255,255,.35)" : "0 0 0 transparent",
+                  textShadow: flash === i ? "0 0 32px rgba(120,255,190,.8)" : state === "active" && large ? "0 0 28px rgba(255,255,255,.35)" : "0 0 0 transparent",
                   // Effet de vague : les lignes suivantes rattrapent la position avec un léger retard.
                   transitionDelay: follow && dist > 0 ? `${Math.min(dist, 6) * 40}ms` : "0ms",
                 }}
               >
                 {state === "active" ? (
-                  <KaraokeLine text={line.text} start={line.timeMs} end={lines[i + 1]?.timeMs ?? line.timeMs + 6000} now={now} large={large} />
+                  <KaraokeLine line={timeline[i]} now={now} large={large} />
                 ) : (
                   line.text
                 )}
               </button>
             )
           })}
-          <div className={cn("mt-7 flex flex-wrap items-center gap-2 text-xs", large ? "text-white/60" : "text-mid")}>
-            <span>Décalage {offsetMs > 0 ? "+" : ""}{(offsetMs / 1000).toFixed(1)} s</span>
-            <button onClick={() => adjustOffset(-500)} className="rounded-md border border-[var(--glass-border)] px-2 py-1" aria-label="Retarder les paroles de 0,5 seconde">− 0,5 s</button>
-            <button onClick={() => adjustOffset(500)} className="rounded-md border border-[var(--glass-border)] px-2 py-1" aria-label="Avancer les paroles de 0,5 seconde">+ 0,5 s</button>
-            {offsetMs !== 0 && <button onClick={() => adjustOffset(-offsetMs)} className="rounded-md px-2 py-1 underline">Réinitialiser</button>}
-          </div>
           <Footer source={source} large={large} onRefresh={onRefresh} onSearch={onSearch} />
         </div>
       </div>
+
+      <SyncBar large={large} offsetMs={sectionOff} sections={sync.anchors.length} synced={synced} onNudge={nudge} onTap={tap} onReset={() => saveSync(EMPTY_SYNC)} lifted={!follow} />
 
       {!follow && (
         <button
@@ -481,6 +657,41 @@ function SyncedLyrics({ lines, source, approximate, large, onRefresh, onSearch }
           )}
         >
           <LocateFixed size={15} /> Synchroniser
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Barre de calage : discrète, elle s'affiche au survol des paroles. */
+function SyncBar({ large, offsetMs, sections, synced, onNudge, onTap, onReset, lifted }: { large?: boolean; offsetMs: number; sections: number; synced: boolean; onNudge: (d: number) => void; onTap: () => void; onReset: () => void; lifted: boolean }) {
+  const btn = cn("grid h-7 min-w-7 place-items-center rounded-full px-1.5 transition active:scale-90", large ? "hover:bg-white/15" : "hover:bg-[color-mix(in_srgb,var(--text-hi)_10%,transparent)]")
+  return (
+    <div
+      className={cn(
+        "absolute right-2 flex items-center gap-0.5 rounded-full p-1 text-xs font-semibold opacity-0 shadow-lg transition-all duration-300 group-hover/lyrics:opacity-100 focus-within:opacity-100",
+        lifted ? "bottom-16" : "bottom-3",
+        large ? "bg-black/35 text-white/85 ring-1 ring-white/10" : "glass text-mid",
+      )}
+    >
+      <button onClick={() => onNudge(-100)} className={btn} aria-label="Retarder les paroles de 0,1 s ([)" title="Paroles plus tard ([)">
+        <Minus size={13} />
+      </button>
+      <span className="w-14 text-center tnum" title={sections ? `${sections + 1} sections calées` : "Décalage"}>
+        {offsetMs > 0 ? "+" : offsetMs < 0 ? "−" : "±"}
+        {(Math.abs(offsetMs) / 1000).toFixed(1)} s
+      </span>
+      <button onClick={() => onNudge(100)} className={btn} aria-label="Avancer les paroles de 0,1 s (])" title="Paroles plus tôt (])">
+        <Plus size={13} />
+      </button>
+      <button onClick={onTap} className={cn(btn, "gap-1 px-2.5", large ? "bg-white/15" : "bg-[color-mix(in_srgb,var(--text-hi)_10%,transparent)]")} title="Appuyez quand la ligne commence à être chantée (T)">
+        <span className="flex items-center gap-1">
+          <Crosshair size={13} /> Caler
+        </span>
+      </button>
+      {synced && (
+        <button onClick={onReset} className={btn} aria-label="Réinitialiser le calage" title="Réinitialiser">
+          <RotateCw size={12} />
         </button>
       )}
     </div>

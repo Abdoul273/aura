@@ -15,7 +15,7 @@ use lofty::prelude::*;
 use serde_json::{json, Value};
 
 use crate::db::Db;
-use crate::models::{Lyrics, LyricsLine, LyricsResult, LyricsSearch};
+use crate::models::{Lyrics, LyricsLine, LyricsResult, LyricsSearch, LyricsWord};
 
 /// Écart de durée sous lequel des paroles synchronisées tombent juste (max avec 2 % de la durée).
 const EXACT_SYNC_S: f64 = 3.0;
@@ -920,13 +920,18 @@ fn fetch_netease_lyrics(agent: &ureq::Agent, hits: Vec<Hit>) -> Vec<Hit> {
             let out = &out;
             s.spawn(move || {
                 let Ok(mut r) = agent
-                    .get("https://music.163.com/api/song/lyric")
+                    .get("https://music.163.com/api/song/lyric/v1")
                     .header("Referer", "https://music.163.com/")
                     .header("User-Agent", BROWSER_UA)
                     .query("id", &h.key)
-                    .query("lv", "1")
-                    .query("kv", "1")
-                    .query("tv", "-1")
+                    .query("cp", "false")
+                    .query("lv", "0")
+                    .query("kv", "0")
+                    .query("tv", "0")
+                    .query("rv", "0")
+                    .query("yv", "0")
+                    .query("ytv", "0")
+                    .query("yrv", "0")
                     .call()
                 else {
                     return;
@@ -937,7 +942,9 @@ fn fetch_netease_lyrics(agent: &ureq::Agent, hits: Vec<Hit>) -> Vec<Hit> {
                     out.lock().unwrap().push(h);
                     return;
                 }
-                let text = v["lrc"]["lyric"].as_str().unwrap_or("").trim().to_string();
+                // Mot à mot (yrc) en priorité : synchro bien plus fine que le LRC ligne à ligne.
+                let yrc = v["yrc"]["lyric"].as_str().and_then(yrc_to_lrc).filter(|t| matches!(from_text(t, ""), Some(Lyrics::Synced { .. })));
+                let text = yrc.unwrap_or_else(|| v["lrc"]["lyric"].as_str().unwrap_or("").trim().to_string());
                 if text.is_empty() {
                     return;
                 }
@@ -1137,8 +1144,18 @@ pub fn from_text(text: &str, source: &str) -> Option<Lyrics> {
         if is_credit(&clean) {
             continue;
         }
+        let (words, end) = word_stamps(rest);
+        let shift = |ms: i64| (ms - offset_ms).max(0) as u64;
         for ms in stamps {
-            lines.push(LyricsLine { time_ms: (ms - offset_ms).max(0) as u64, text: clean.clone() });
+            // Les mots ne valent que pour la première occurrence d'une ligne répétée ([00:10][00:40]…) : on les décale.
+            let delta = words.first().map_or(0, |w| ms - w.0);
+            let delta = if is_jitter(delta) { 0 } else { delta };
+            lines.push(LyricsLine {
+                time_ms: shift(ms),
+                text: clean.clone(),
+                words: words.iter().map(|(t, w)| LyricsWord { time_ms: shift(t + delta), text: w.clone() }).collect(),
+                end_ms: end.map(|e| shift(e + delta)),
+            });
         }
     }
     // Horodatage factice (tout à 0) : ce sont des paroles brutes.
@@ -1170,6 +1187,10 @@ pub fn from_text(text: &str, source: &str) -> Option<Lyrics> {
         if out.last().is_some_and(|p| p.time_ms == l.time_ms && p.text == l.text) {
             continue;
         }
+        // Lignes JSON de crédits NetEase ({"t":0,"c":[…]}) glissées dans le yrc/lrc.
+        if l.text.starts_with("{\"") {
+            continue;
+        }
         out.push(l);
     }
     while out.last().is_some_and(|l| l.text.is_empty()) {
@@ -1179,6 +1200,91 @@ pub fn from_text(text: &str, source: &str) -> Option<Lyrics> {
         return None;
     }
     Some(Lyrics::Synced { lines: out, source: source.into(), approximate: false })
+}
+
+/// Un écart de moins d'une seconde entre la ligne et son premier mot est du bruit de saisie, pas une répétition.
+fn is_jitter(delta: i64) -> bool {
+    delta.abs() < 1000
+}
+
+/// Mots d'une ligne LRC enrichie : « <00:01.00>Salut <00:01.50>toi <00:02.10> ».
+/// Le dernier horodatage sans texte marque la fin de la ligne.
+fn word_stamps(s: &str) -> (Vec<(i64, String)>, Option<i64>) {
+    let mut words: Vec<(i64, String)> = Vec::new();
+    let mut end = None;
+    let mut rest = s;
+    while let Some(i) = rest.find('<') {
+        let Some(j) = rest[i..].find('>') else { break };
+        let Some(ms) = parse_stamp(&rest[i + 1..i + j]) else {
+            rest = &rest[i + 1..];
+            continue;
+        };
+        let after = &rest[i + j + 1..];
+        let next = after.find('<').unwrap_or(after.len());
+        let text = after[..next].to_string();
+        if text.trim().is_empty() {
+            end = Some(ms);
+        } else {
+            words.push((ms, text));
+            end = None;
+        }
+        rest = &after[next..];
+    }
+    // Espaces normalisés comme le texte de la ligne ; un mot sans espace final se colle au suivant.
+    let mut out: Vec<(i64, String)> = Vec::with_capacity(words.len());
+    for (ms, t) in words {
+        let collapsed = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        let trailing = t.ends_with(char::is_whitespace) && !collapsed.is_empty();
+        let lead = t.starts_with(char::is_whitespace);
+        if lead {
+            if let Some(prev) = out.last_mut() {
+                if !prev.1.ends_with(' ') {
+                    prev.1.push(' ');
+                }
+            }
+        }
+        if collapsed.is_empty() {
+            continue;
+        }
+        out.push((ms, if trailing { format!("{collapsed} ") } else { collapsed }));
+    }
+    if let Some(last) = out.last_mut() {
+        last.1 = last.1.trim_end().to_string();
+    }
+    (out, end)
+}
+
+/// yrc NetEase (« [12000,2880](12000,390,0)If (12390,180,0)I … ») converti en LRC enrichi.
+fn yrc_to_lrc(yrc: &str) -> Option<String> {
+    let stamp = |ms: i64| format!("{:02}:{:02}.{:03}", ms / 60_000, (ms / 1000) % 60, ms % 1000);
+    let mut out = String::new();
+    for line in yrc.lines() {
+        let line = line.trim();
+        if !line.starts_with('[') {
+            continue;
+        }
+        let Some(close) = line.find(']') else { continue };
+        let mut head = line[1..close].split(',');
+        let (Some(Ok(start)), Some(Ok(dur))) = (head.next().map(|x| x.trim().parse::<i64>()), head.next().map(|x| x.trim().parse::<i64>())) else { continue };
+        let mut body = String::new();
+        let mut rest = &line[close + 1..];
+        while let Some(i) = rest.find('(') {
+            let Some(j) = rest[i..].find(')') else { break };
+            let Some(t) = rest[i + 1..i + j].split(',').next().and_then(|x| x.trim().parse::<i64>().ok()) else {
+                rest = &rest[i + 1..];
+                continue;
+            };
+            let after = &rest[i + j + 1..];
+            let next = after.find('(').unwrap_or(after.len());
+            body.push_str(&format!("<{}>{}", stamp(t), &after[..next]));
+            rest = &after[next..];
+        }
+        if body.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("[{}]{}<{}>\n", stamp(start), body, stamp(start + dur)));
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 fn strip_word_stamps(s: &str) -> String {
@@ -1242,6 +1348,19 @@ mod tests {
         assert!(v.iter().any(|q| q.artists.first().map(String::as_str) == Some("2Pac") && q.title == "When It Rains"));
         let v = Query::variants("La Fouine - La fin du monde (Clip officiel)", "LaFouineVEVO", "", "/x/a.m4a", 278_000);
         assert_eq!((v[0].artists[0].as_str(), v[0].title.as_str()), ("LaFouine", "La fin du monde"));
+    }
+
+    #[test]
+    fn garde_les_mots_horodates() {
+        let Some(Lyrics::Synced { lines, .. }) = from_text("[00:01.00]<00:01.00>Salut <00:01.50>toi<00:02.20>\n[00:05.00]Fin", "t") else { panic!() };
+        assert_eq!(lines[0].words.iter().map(|w| (w.time_ms, w.text.as_str())).collect::<Vec<_>>(), vec![(1000, "Salut "), (1500, "toi")]);
+        assert_eq!(lines[0].end_ms, Some(2200));
+        assert!(lines[1].words.is_empty());
+        let lrc = yrc_to_lrc("{\"t\":0,\"c\":[{\"tx\":\"作词: \"}]}\n[12000,2880](12000,390,0)If (12390,180,0)I (12570,540,0)tell\n[16260,1290](16260,360,0)My (16620,360,0)mo").unwrap();
+        let Some(Lyrics::Synced { lines, .. }) = from_text(&lrc, "t") else { panic!() };
+        assert_eq!(lines[0].text, "If I tell");
+        assert_eq!(lines[0].words[2].time_ms, 12570);
+        assert_eq!(lines[0].end_ms, Some(14880));
     }
 
     #[test]

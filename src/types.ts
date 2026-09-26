@@ -102,6 +102,9 @@ export interface QueueItem {
 export interface LyricsLine {
   timeMs: number
   text: string
+  /** Horodatage mot à mot, quand la source le fournit (LRC enrichi, NetEase yrc). */
+  words?: { timeMs: number; text: string }[]
+  endMs?: number
 }
 
 export type Lyrics =

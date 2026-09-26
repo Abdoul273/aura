@@ -214,6 +214,19 @@ pub struct ScanProgress {
 pub struct LyricsLine {
     pub time_ms: u64,
     pub text: String,
+    /// Horodatage mot à mot (LRC enrichi, yrc NetEase) quand la source le fournit.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<LyricsWord>,
+    /// Fin de la ligne chantée, si connue.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsWord {
+    pub time_ms: u64,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
