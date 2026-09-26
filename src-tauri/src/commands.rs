@@ -13,6 +13,7 @@ use crate::models::*;
 use crate::player::Player;
 use crate::settings::SettingsStore;
 use crate::visualizer::Visualizer;
+use crate::download::{DlJob, DlResult, Downloader};
 use crate::{lyrics, scanner};
 
 pub struct AppState {
@@ -23,6 +24,7 @@ pub struct AppState {
     pub cover_dir: PathBuf,
     pub lyrics_dir: PathBuf,
     pub scanning: AtomicBool,
+    pub downloader: Arc<Downloader>,
 }
 
 type Res<T> = Result<T, String>;
@@ -113,6 +115,42 @@ pub async fn lyrics_search(st: S<'_>, track_id: String, query: Option<String>) -
 pub async fn lyrics_choose(st: S<'_>, track_id: String, text: String, source: String, duration_s: f64) -> Res<Option<Lyrics>> {
     let st = st.inner().clone();
     tauri::async_runtime::spawn_blocking(move || lyrics::choose(&st.db, &st.lyrics_dir, &track_id, &text, &source, duration_s)).await.map_err(err)
+}
+
+// ---------- téléchargement ----------
+
+#[tauri::command]
+pub async fn download_search(st: S<'_>, query: String) -> Res<Vec<DlResult>> {
+    let d = st.downloader.clone();
+    tauri::async_runtime::spawn_blocking(move || d.search(&query)).await.map_err(err)?
+}
+
+#[tauri::command]
+pub async fn download_probe(st: S<'_>, id: String, artist: String, track: String, duration_s: f64) -> Res<String> {
+    let d = st.downloader.clone();
+    tauri::async_runtime::spawn_blocking(move || d.probe(&id, &artist, &track, duration_s)).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn download_start(app: AppHandle, st: S<'_>, result: DlResult) -> Res<DlJob> {
+    Ok(st.downloader.start(app, result))
+}
+
+#[tauri::command]
+pub async fn download_cancel(app: AppHandle, st: S<'_>, id: String) -> Res<()> {
+    st.downloader.cancel(&app, &id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn download_list(st: S<'_>) -> Res<Vec<DlJob>> {
+    Ok(st.downloader.list())
+}
+
+#[tauri::command]
+pub async fn download_clear(st: S<'_>) -> Res<()> {
+    st.downloader.clear_finished();
+    Ok(())
 }
 
 // ---------- lecture ----------

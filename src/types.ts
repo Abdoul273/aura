@@ -110,6 +110,40 @@ export type Lyrics =
   | { kind: "instrumental"; source: string }
   | null
 
+/** Résultat de recherche du téléchargeur (YouTube). */
+export interface DlResult {
+  id: string
+  url: string
+  title: string
+  channel: string
+  durationS: number
+  views: number
+  thumbnail: string
+  verified: boolean
+  /** Artiste et titre qui seront écrits dans les tags (modifiables). */
+  artist: string
+  track: string
+  kind: "audio" | "clip" | "live" | "other"
+}
+
+export type LyricsAvailability = "synced" | "approx" | "plain" | "instrumental" | "none"
+
+export type DlStatus = "queued" | "downloading" | "retrying" | "converting" | "tagging" | "lyrics" | "done" | "error" | "canceled"
+
+export interface DlJob {
+  id: string
+  title: string
+  artist: string
+  thumbnail: string
+  status: DlStatus
+  progress: number
+  speed: string
+  eta: string
+  error: string | null
+  lyrics: LyricsAvailability | null
+  path: string | null
+}
+
 /** Résultat de la recherche manuelle de paroles. */
 export interface LyricsResult {
   title: string

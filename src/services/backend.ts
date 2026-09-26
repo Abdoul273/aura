@@ -9,7 +9,10 @@ import type {
   EqPreset,
   FolderNode,
   LibraryStats,
+  DlJob,
+  DlResult,
   Lyrics,
+  LyricsAvailability,
   LyricsResult,
   LyricsSearch,
   OutputStatus,
@@ -99,6 +102,19 @@ export interface MusicBackend {
     search(trackId: string, query?: string): Promise<LyricsSearch>
     /** Adopte un résultat de recherche comme paroles du morceau. */
     choose(trackId: string, result: LyricsResult): Promise<Lyrics>
+  }
+  downloads: {
+    /** Recherche YouTube, ou lien direct (vidéo / playlist). */
+    search(query: string): Promise<DlResult[]>
+    /** Paroles disponibles pour ce résultat. */
+    probe(r: DlResult): Promise<LyricsAvailability>
+    start(r: DlResult): Promise<DlJob>
+    cancel(id: string): Promise<void>
+    list(): Promise<DlJob[]>
+    clearFinished(): Promise<void>
+    onUpdate(cb: (job: DlJob) => void): Unsubscribe
+    /** Identifiant du titre une fois le fichier scanné (null tant qu'il n'est pas dans la bibliothèque). */
+    trackIdForPath(path: string): string | null
   }
   artwork: {
     getUrl(albumId: string, size: number): string

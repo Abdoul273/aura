@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import {
   Home, Search, Library, ListMusic, Disc3, Users, Folder, Radio, Heart, BarChart3,
-  Plus, PanelLeftClose, PanelLeft, Music2,
+  Plus, PanelLeftClose, PanelLeft, Music2, Download,
 } from "lucide-react"
 import { useUI, type Route } from "../../store/uiStore"
 import { useSettings } from "../../store/settingsStore"
@@ -54,6 +54,7 @@ export default function Sidebar() {
   const primary = [
     { icon: Home, label: "Accueil", r: { name: "home" } as Route },
     { icon: Search, label: "Recherche", r: { name: "search" } as Route },
+    { icon: Download, label: "Télécharger", r: { name: "download" } as Route },
   ]
   const library = [
     { icon: ListMusic, label: "Titres", r: { name: "tracks" } as Route },

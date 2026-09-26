@@ -150,6 +150,57 @@ pub fn choose(db: &Db, cache_dir: &Path, track_id: &str, text: &str, source: &st
     read_cache(&cached)
 }
 
+/// Paroles trouvées en ligne pour un morceau qui n'est pas (encore) dans la bibliothèque.
+#[derive(Clone, Debug)]
+pub struct Found {
+    pub text: String,
+    pub source: String,
+    pub synced: bool,
+    /// Synchronisées sur une version de durée différente.
+    pub approximate: bool,
+    pub instrumental: bool,
+}
+
+pub fn find_for(title: &str, artist: &str, album: &str, duration_ms: u64) -> Option<Found> {
+    let queries = Query::variants(title, artist, album, "", duration_ms);
+    if queries.is_empty() {
+        return None;
+    }
+    let v = fetch_online(&queries).ok()??;
+    Some(Found {
+        text: v["text"].as_str().unwrap_or("").to_string(),
+        source: v["source"].as_str().unwrap_or("En ligne").to_string(),
+        synced: v["synced"].as_bool() == Some(true),
+        approximate: v["approximate"].as_bool() == Some(true),
+        instrumental: v["instrumental"].as_bool() == Some(true),
+    })
+}
+
+/// Artiste et titre propres depuis un titre de vidéo (« Booba - Arc-en-ciel (Audio) ») et sa chaîne.
+pub fn guess_artist_title(video_title: &str, channel: &str) -> (String, String) {
+    let decoded = url_decode(video_title);
+    let parts = split_dash(&decoded);
+    if parts.len() >= 2 {
+        let artists = split_artists(parts[0]);
+        let title = clean(parts[1]);
+        let feats: Vec<String> = featured(parts[1]).into_iter().filter(|f| !artists.contains(f)).collect();
+        let title = if feats.is_empty() { title } else { format!("{title} (feat. {})", feats.join(", ")) };
+        if !artists.is_empty() && !title.is_empty() {
+            return (artists.join(", "), title);
+        }
+    }
+    let mut artist = usable_artist(channel).unwrap_or_default();
+    for suffix in ["Officiel", "Official", "Music", "Musique", "TV"] {
+        if let Some(s) = artist.strip_suffix(suffix) {
+            if !s.trim().is_empty() {
+                artist = s.trim().to_string();
+            }
+        }
+    }
+    let title = clean(&decoded);
+    (artist, if title.is_empty() { decoded.trim().to_string() } else { title })
+}
+
 fn cache_paths(cache_dir: &Path, track_id: &str) -> (PathBuf, PathBuf) {
     (cache_dir.join(format!("{CACHE_VERSION}-{track_id}.json")), cache_dir.join(format!("{CACHE_VERSION}-{track_id}.none")))
 }

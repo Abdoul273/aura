@@ -18,7 +18,10 @@ import type {
   EqPreset,
   FolderNode,
   LibraryStats,
+  DlJob,
+  DlResult,
   Lyrics,
+  LyricsAvailability,
   LyricsResult,
   LyricsSearch,
   OutputStatus,
@@ -292,6 +295,7 @@ const analyserCh = channel<number[]>()
 const scanCh = channel<ScanProgress>()
 const outputCh = channel<OutputStatus>()
 const changedCh = channel<void>()
+const downloadCh = channel<DlJob>()
 
 let state: PlayerState = {
   status: "stopped",
@@ -345,6 +349,7 @@ export async function initTauriBackend() {
       scanCh.emit(e.payload)
     }),
     listen("library:changed", () => void reloadLibrary()),
+    listen<DlJob>("download:update", (e) => downloadCh.emit(e.payload)),
     listen<{ trackId: string }>("library:played", (e) => {
       const t = trackById.get(e.payload.trackId)
       if (t) t.plays += 1
@@ -586,6 +591,17 @@ export const tauriBackend: MusicBackend = {
     async choose(trackId, r) {
       return (await invoke<Lyrics>("lyrics_choose", { trackId, text: r.text, source: r.source, durationS: r.durationS })) ?? null
     },
+  },
+
+  downloads: {
+    search: (query) => invoke<DlResult[]>("download_search", { query }),
+    probe: (r) => invoke<LyricsAvailability>("download_probe", { id: r.id, artist: r.artist, track: r.track, durationS: r.durationS }),
+    start: (result) => invoke<DlJob>("download_start", { result }),
+    cancel: (id) => invoke<void>("download_cancel", { id }),
+    list: () => invoke<DlJob[]>("download_list"),
+    clearFinished: () => invoke<void>("download_clear"),
+    onUpdate: (cb) => downloadCh.add(cb),
+    trackIdForPath: (path) => tracks.find((t) => t.filePath === path)?.id ?? null,
   },
 
   artwork: {

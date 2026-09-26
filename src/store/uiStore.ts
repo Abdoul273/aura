@@ -15,6 +15,7 @@ export type Route =
   | { name: "stats" }
   | { name: "equalizer" }
   | { name: "settings" }
+  | { name: "download" }
 
 export interface ContextMenuState {
   x: number

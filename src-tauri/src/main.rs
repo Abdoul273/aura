@@ -4,6 +4,7 @@
 
 mod commands;
 mod db;
+mod download;
 mod lyrics;
 mod models;
 mod mpv;
@@ -56,6 +57,7 @@ fn main() {
                 cover_dir,
                 lyrics_dir: cache_dir.join("lyrics"),
                 scanning: AtomicBool::new(false),
+                downloader: Arc::new(download::Downloader::new(cache_dir.join("downloads"), config_dir.clone())),
             }));
 
             // Scan incrémental au démarrage (seuls les fichiers nouveaux ou modifiés sont relus).
@@ -76,6 +78,12 @@ fn main() {
             lyrics_get,
             lyrics_search,
             lyrics_choose,
+            download_search,
+            download_probe,
+            download_start,
+            download_cancel,
+            download_list,
+            download_clear,
             player_state,
             player_play,
             player_pause,

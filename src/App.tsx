@@ -33,6 +33,7 @@ import Radios from "./features/radios/Radios"
 import Stats from "./features/stats/Stats"
 import Equalizer from "./features/equalizer/Equalizer"
 import SettingsScreen from "./features/settings/Settings"
+import DownloadScreen from "./features/download/Download"
 import NowPlaying from "./features/nowplaying/NowPlaying"
 import MiniPlayer from "./features/nowplaying/MiniPlayer"
 
@@ -53,6 +54,7 @@ function CurrentScreen() {
     case "stats": return <Stats />
     case "equalizer": return <Equalizer />
     case "settings": return <SettingsScreen />
+    case "download": return <DownloadScreen />
     default: return <Home />
   }
 }
