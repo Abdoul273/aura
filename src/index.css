@@ -1,0 +1,176 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..800&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  /* dynamic-color variables, updated at runtime from artwork */
+  --dyn-dominant: #6d5bd6;
+  --dyn-accent: #b06dff;
+  --dyn-muted: #241a3a;
+  --accent: #7c5cff;
+  --blur: 26px;
+
+  --bg-0: #07070c;
+  --bg-1: #0c0c14;
+  --text-hi: #f6f5fb;
+  --text-mid: #b9b6cc;
+  --text-lo: #7d7a92;
+  --glass-bg: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-hi: rgba(255, 255, 255, 0.22);
+  --panel: rgba(255, 255, 255, 0.07);
+}
+
+:root.light {
+  --bg-0: #eceaf3;
+  --bg-1: #f4f3f9;
+  --text-hi: #16141f;
+  --text-mid: #423e52;
+  --text-lo: #6f6a80;
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(20, 16, 40, 0.08);
+  --glass-hi: rgba(255, 255, 255, 0.7);
+  --panel: rgba(255, 255, 255, 0.72);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--text-hi);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* thin auto-hiding scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer utilities {
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--blur)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-hi),
+      0 20px 50px -20px rgba(0, 0, 0, 0.65);
+  }
+  .glass-panel {
+    background: var(--panel);
+    backdrop-filter: blur(var(--blur)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-hi),
+      0 24px 60px -24px rgba(0, 0, 0, 0.6);
+  }
+  .text-hi {
+    color: var(--text-hi);
+  }
+  .text-mid {
+    color: var(--text-mid);
+  }
+  .text-lo {
+    color: var(--text-lo);
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+  .noise {
+    position: relative;
+  }
+  .noise::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+input[type='range']::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1.1) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.25) rotate(8deg);
+  }
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1.1) rotate(0deg);
+  }
+}
+.aurora {
+  animation: aurora-drift 26s ease-in-out infinite;
+}
+
+@keyframes eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto;
+  }
+}

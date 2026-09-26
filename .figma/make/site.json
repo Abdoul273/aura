@@ -1,0 +1,10 @@
+{
+  "description": "Experience a premium desktop music player designed for local libraries and internet radio, featuring a sleek, interactive interface and dynamic visuals.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
