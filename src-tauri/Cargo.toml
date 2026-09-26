@@ -1,0 +1,30 @@
+[package]
+name = "aura"
+version = "0.1.0"
+description = "Aura — lecteur de musique haute-fidélité"
+authors = ["Abdoul Goudousse Diallo"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+lofty = "0.25"
+walkdir = "2"
+rayon = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
+souvlaki = "0.8"
+rustfft = "6"
+ureq = { version = "3", features = ["json"] }
+dirs = "6"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
