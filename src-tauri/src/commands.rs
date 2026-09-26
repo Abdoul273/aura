@@ -436,20 +436,25 @@ pub async fn settings_remove_folder(app: AppHandle, st: S<'_>, path: String) -> 
 pub async fn window_set_mini(app: AppHandle, mini: bool) -> Res<()> {
     let w = app.get_webview_window("main").ok_or("fenêtre introuvable")?;
     let hypr = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some();
+    // Cible la fenêtre d'Aura par PID : la fenêtre active n'est pas forcément la nôtre.
+    let me = format!("pid:{}", std::process::id());
+    let hyprctl = |batch: String| {
+        let _ = std::process::Command::new("hyprctl").args(["--batch", &batch]).output();
+    };
     if mini {
         let _ = w.set_min_size(None::<tauri::LogicalSize<f64>>);
         if hypr {
-            let _ = std::process::Command::new("hyprctl")
-                .args(["--batch", "dispatch setfloating ; dispatch resizeactive exact 400 150 ; dispatch pin"])
-                .output();
+            hyprctl(format!(
+                "dispatch setfloating {me} ; dispatch resizewindowpixel exact 460 168,{me} ; dispatch movewindowpixel exact 70% 4%,{me} ; dispatch pin {me}"
+            ));
         } else {
-            let _ = w.set_size(tauri::LogicalSize::new(400.0, 150.0));
+            let _ = w.set_size(tauri::LogicalSize::new(460.0, 168.0));
         }
         let _ = w.set_always_on_top(true);
     } else {
         let _ = w.set_always_on_top(false);
         if hypr {
-            let _ = std::process::Command::new("hyprctl").args(["--batch", "dispatch pin ; dispatch settiled"]).output();
+            hyprctl(format!("dispatch pin {me} ; dispatch settiled {me}"));
         } else {
             let _ = w.set_size(tauri::LogicalSize::new(1440.0, 900.0));
         }

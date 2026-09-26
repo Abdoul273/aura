@@ -211,3 +211,35 @@ input[type='range']::-moz-range-thumb {
 .lyrics-scroll::-webkit-scrollbar {
   display: none;
 }
+
+/* Mini-lecteur */
+@keyframes mini-breathe {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.75;
+  }
+}
+.mini-breathe {
+  animation: mini-breathe 3.2s ease-in-out infinite;
+}
+@keyframes mini-marquee {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  55%,
+  70% {
+    transform: translateX(var(--dx));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+.mini-marquee {
+  animation: mini-marquee 10s ease-in-out infinite;
+}
