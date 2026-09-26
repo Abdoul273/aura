@@ -219,8 +219,9 @@ pub struct LyricsLine {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Lyrics {
-    Synced { lines: Vec<LyricsLine> },
-    Plain { text: String },
+    Synced { lines: Vec<LyricsLine>, source: String },
+    Plain { text: String, source: String },
+    Instrumental { source: String },
 }
 
 /// Agrégats d'écoute ; le frontend les complète avec les données de la bibliothèque.

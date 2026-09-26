@@ -97,9 +97,10 @@ pub async fn stats_plays(st: S<'_>, tz_offset_min: i64) -> Res<PlayStats> {
 }
 
 #[tauri::command]
-pub async fn lyrics_get(st: S<'_>, track_id: String) -> Res<Option<Lyrics>> {
+pub async fn lyrics_get(st: S<'_>, track_id: String, force: Option<bool>) -> Res<Option<Lyrics>> {
     let st = st.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || lyrics::get(&st.db, &st.lyrics_dir, &track_id)).await.map_err(err)
+    let force = force.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || lyrics::get(&st.db, &st.lyrics_dir, &track_id, force)).await.map_err(err)
 }
 
 // ---------- lecture ----------

@@ -566,8 +566,8 @@ export const tauriBackend: MusicBackend = {
   },
 
   lyrics: {
-    async get(trackId) {
-      return (await invoke<Lyrics>("lyrics_get", { trackId })) ?? null
+    async get(trackId, force = false) {
+      return (await invoke<Lyrics>("lyrics_get", { trackId, force })) ?? null
     },
   },
 

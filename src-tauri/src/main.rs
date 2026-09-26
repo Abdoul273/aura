@@ -20,6 +20,12 @@ use tauri::{Manager, RunEvent};
 use commands::*;
 
 fn main() {
+    // WebKitGTK + Wayland : le rendu DMA-BUF donne des fenêtres noires sur plusieurs pilotes.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())

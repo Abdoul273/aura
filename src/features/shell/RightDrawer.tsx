@@ -85,7 +85,7 @@ export default function RightDrawer() {
             )}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4" style={{ width: 340 }}>
+          <div className={cn("min-h-0 flex-1", tab === "lyrics" ? "overflow-hidden" : "overflow-y-auto px-3 pb-4")} style={{ width: 340 }}>
             {tab === "lyrics" ? (
               <LyricsView />
             ) : (

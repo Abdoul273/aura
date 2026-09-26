@@ -14,7 +14,7 @@ import LyricsView from "../../components/LyricsView"
 import Visualizer, { type VizMode } from "../../components/Visualizer"
 import IconButton from "../../components/IconButton"
 import Tooltip from "../../components/Tooltip"
-import { coverGradient } from "../../utils/color"
+import { coverGradient, meshGradient } from "../../utils/color"
 
 type Panel = "none" | "lyrics" | "viz"
 
@@ -55,13 +55,11 @@ export default function NowPlaying() {
             my.set(e.clientY / window.innerHeight - 0.5)
           }}
         >
-          {/* artwork-colored background */}
-          <div className="absolute inset-0" style={{ background: track ? coverGradient(track.colors) : "var(--bg-0)" }} />
-          <motion.div
-            className="aurora absolute -inset-1/4"
-            style={{ background: track ? `radial-gradient(50% 50% at 30% 30%, ${track.colors.accent}, transparent 70%), radial-gradient(50% 50% at 70% 70%, ${track.colors.dominant}, transparent 70%)` : undefined, filter: "blur(80px)", opacity: 0.9 }}
-          />
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-2xl" />
+          {/* Fond aux couleurs de la pochette : dégradés purs, sans filter/backdrop-filter
+              (un blur animé plein écran sous WebKitGTK finit en écran noir). */}
+          <div className="absolute inset-0 bg-[#08080d]" />
+          {track && <div className="absolute inset-0 opacity-90" style={{ background: meshGradient(track.colors) }} />}
+          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,.25) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,.72) 100%)" }} />
 
           {/* header */}
           <div className="relative flex items-center justify-between p-6">
@@ -80,11 +78,11 @@ export default function NowPlaying() {
           </div>
 
           {/* body */}
-          <div className="relative grid h-[calc(100%-180px)] grid-cols-1 place-items-center gap-8 px-10 lg:grid-cols-2">
+          <div className="absolute inset-x-0 bottom-[250px] top-[92px] grid grid-cols-1 place-items-center gap-8 px-10 lg:grid-cols-2">
             <div className="grid place-items-center" style={{ perspective: 1200 }}>
               {track && (
                 <motion.div layoutId="np-cover" style={{ rotateX: rx, rotateY: ry, transformStyle: "preserve-3d" }} className="relative">
-                  <CoverArt colors={track.colors} seed={track.albumId} size={420} rounded="rounded-3xl" className="w-[min(42vw,420px)] shadow-2xl" />
+                  <CoverArt colors={track.colors} seed={track.albumId} size={420} rounded="rounded-3xl" className="w-[min(42vw,420px,calc(100vh-400px))] shadow-2xl" />
                   {/* reflection */}
                   <div
                     className="absolute left-0 top-full mt-2 w-full opacity-30"
@@ -96,7 +94,7 @@ export default function NowPlaying() {
 
             <AnimatePresence mode="wait">
               {panel === "lyrics" && (
-                <motion.div key="lyrics" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 30 }} className="h-full max-h-[60vh] w-full max-w-lg overflow-y-auto">
+                <motion.div key="lyrics" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 30 }} className="h-full w-full max-w-2xl">
                   <LyricsView large />
                 </motion.div>
               )}

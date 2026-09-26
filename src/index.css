@@ -174,3 +174,27 @@ input[type='range']::-moz-range-thumb {
     scroll-behavior: auto;
   }
 }
+
+/* Paroles : points d'attente (intro, pont instrumental). */
+@keyframes lyric-dot {
+  0%,
+  100% {
+    transform: scale(0.7);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.lyric-dot {
+  animation: lyric-dot 1.4s ease-in-out infinite;
+}
+.lyrics-scroll {
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12%, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12%, #000 78%, transparent 100%);
+}
+.lyrics-scroll::-webkit-scrollbar {
+  display: none;
+}

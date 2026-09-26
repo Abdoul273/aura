@@ -105,8 +105,9 @@ export interface LyricsLine {
 }
 
 export type Lyrics =
-  | { kind: "synced"; lines: LyricsLine[] }
-  | { kind: "plain"; text: string }
+  | { kind: "synced"; lines: LyricsLine[]; source: string }
+  | { kind: "plain"; text: string; source: string }
+  | { kind: "instrumental"; source: string }
   | null
 
 export interface EqBand {

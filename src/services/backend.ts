@@ -91,7 +91,8 @@ export interface MusicBackend {
     list(): Promise<string[]>
   }
   lyrics: {
-    get(trackId: string): Promise<Lyrics>
+    /** `force` ignore le cache et relance la recherche en ligne. */
+    get(trackId: string, force?: boolean): Promise<Lyrics>
   }
   artwork: {
     getUrl(albumId: string, size: number): string

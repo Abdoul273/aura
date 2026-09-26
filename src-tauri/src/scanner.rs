@@ -71,8 +71,10 @@ fn mtime_of(meta: &std::fs::Metadata) -> i64 {
 /// "06_-_Mon_titre" → "Mon titre" quand le fichier n'a pas de tag titre.
 fn title_from_filename(p: &Path) -> String {
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Sans titre").replace('_', " ");
-    let trimmed = stem.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start();
-    let trimmed = trimmed.trim_start_matches(['-', '.', ' ']).trim();
+    // Numéro de piste seulement s'il est suivi d'un séparateur (« 2Pac - … » reste entier).
+    let digits = stem.len() - stem.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    let numbered = digits > 0 && stem[digits..].starts_with([' ', '-', '.']);
+    let trimmed = if numbered { stem[digits..].trim_start_matches(['-', '.', ' ']).trim() } else { stem.trim() };
     if trimmed.is_empty() { stem.trim().to_string() } else { trimmed.to_string() }
 }
 
