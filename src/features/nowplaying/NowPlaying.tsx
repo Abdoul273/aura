@@ -8,14 +8,15 @@ import { usePlayer } from "../../store/playerStore"
 import { useShallow } from "zustand/react/shallow"
 import { useUI } from "../../store/uiStore"
 import { useLibrary } from "../../store/libraryStore"
+import { useSettings } from "../../store/settingsStore"
 import { getTrackSync } from "../../services"
 import CoverArt from "../../components/CoverArt"
 import WaveformSeek from "../../components/WaveformSeek"
 import LyricsView from "../../components/LyricsView"
-import Visualizer, { type VizMode } from "../../components/Visualizer"
+import Visualizer from "../../components/Visualizer"
 import IconButton from "../../components/IconButton"
 import Tooltip from "../../components/Tooltip"
-import { coverGradient, meshGradient } from "../../utils/color"
+import { meshGradient } from "../../utils/color"
 
 type Panel = "none" | "lyrics" | "viz"
 
@@ -26,7 +27,10 @@ export default function NowPlaying() {
   const favorites = useLibrary((s) => s.favorites)
   const toggleFav = useLibrary((s) => s.toggleFavorite)
   const [panel, setPanel] = useState<Panel>("none")
-  const [vizMode, setVizMode] = useState<VizMode>("bars")
+  const settings = useSettings((s) => s.settings)
+  const updateSettings = useSettings((s) => s.update)
+  const vizMode = settings?.visualizerMode ?? "bars"
+  const vizColor = settings?.visualizerColor ?? "white"
 
   // 3D tilt
   const mx = useMotionValue(0)
@@ -60,7 +64,8 @@ export default function NowPlaying() {
               (un blur animé plein écran sous WebKitGTK finit en écran noir). */}
           <div className="absolute inset-0 bg-[#08080d]" />
           {track && <div className="absolute inset-0 opacity-90" style={{ background: meshGradient(track.colors) }} />}
-          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,.25) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,.72) 100%)" }} />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,.25) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,.78) 100%)" }} />
+          <div className="pointer-events-none absolute inset-5 rounded-[34px] border border-white/[0.08]" />
 
           {/* header */}
           <div className="relative flex items-center justify-between p-6">
@@ -79,16 +84,17 @@ export default function NowPlaying() {
           </div>
 
           {/* body */}
-          <div className="absolute inset-x-0 bottom-[272px] top-[92px] grid grid-cols-1 grid-rows-[minmax(0,1fr)] place-items-center gap-8 px-10 lg:grid-cols-2">
-            <div className={panel === "lyrics" ? "hidden place-items-center lg:grid" : "grid place-items-center"} style={{ perspective: 1200 }}>
+          <div className="absolute inset-x-0 bottom-[272px] top-[92px] grid grid-cols-1 grid-rows-[minmax(0,1fr)] place-items-center gap-8 px-5 md:px-10 lg:grid-cols-2">
+            <div className={panel === "none" ? "grid place-items-center" : "hidden place-items-center lg:grid"} style={{ perspective: 1200 }}>
               {track && (
                 <motion.div layoutId="np-cover" style={{ rotateX: rx, rotateY: ry, transformStyle: "preserve-3d" }} className="relative">
-                  <CoverArt colors={track.colors} seed={track.albumId} size={420} rounded="rounded-3xl" className="w-[min(42vw,420px,calc(100vh-400px))] shadow-2xl" />
+                  <div className="pointer-events-none absolute -inset-4 rounded-[36px] border border-white/15 bg-white/[0.04]" />
+                  <CoverArt colors={track.colors} seed={track.albumId} size={480} alt={`Pochette de ${track.album}`} priority rounded="rounded-3xl" className="relative w-[min(42vw,460px,calc(100vh-400px))] shadow-[0_36px_90px_-22px_rgba(0,0,0,.85)] ring-1 ring-white/20" />
                   {/* reflection */}
                   <div
-                    className="absolute left-0 top-full mt-2 w-full opacity-30"
-                    style={{ height: 120, background: coverGradient(track.colors), transform: "scaleY(-1)", maskImage: "linear-gradient(to bottom, rgba(0,0,0,.5), transparent)", WebkitMaskImage: "linear-gradient(to bottom, rgba(0,0,0,.5), transparent)", borderRadius: 24 }}
-                  />
+                    className="pointer-events-none absolute left-0 top-full mt-3 h-28 w-full overflow-hidden rounded-3xl opacity-20"
+                    style={{ transform: "scaleY(-1)", maskImage: "linear-gradient(to bottom, transparent, #000)", WebkitMaskImage: "linear-gradient(to bottom, transparent, #000)" }}
+                  ><CoverArt colors={track.colors} seed={track.albumId} size={480} className="w-full" /></div>
                 </motion.div>
               )}
             </div>
@@ -102,21 +108,25 @@ export default function NowPlaying() {
               {panel === "viz" && (
                 <motion.div key="viz" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 30 }} className="flex h-full w-full max-w-lg flex-col">
                   <div className="min-h-0 flex-1">
-                    <Visualizer mode={vizMode} color="#ffffff" />
+                    <Visualizer mode={vizMode} color={vizColor === "artwork" ? (track?.colors.accent ?? "#ffffff") : "#ffffff"} />
                   </div>
                   <div className="mt-3 flex justify-center gap-2">
                     {([["bars", BarChart3], ["circular", CircleDot], ["waves", AudioWaveform]] as const).map(([m, Ico]) => (
                       <Tooltip key={m} label={m === "bars" ? "Barres" : m === "circular" ? "Circulaire" : "Ondes"}>
-                        <button onClick={() => setVizMode(m)} className={`rounded-full p-2.5 ${vizMode === m ? "bg-white/25 text-white" : "text-white/60 hover:text-white"}`} aria-label={m}>
+                        <button onClick={() => void updateSettings({ visualizerMode: m })} className={`rounded-full p-2.5 ${vizMode === m ? "bg-white/25 text-white" : "text-white/60 hover:text-white"}`} aria-label={m} aria-pressed={vizMode === m}>
                           <Ico size={18} />
                         </button>
                       </Tooltip>
                     ))}
                   </div>
+                  <div className="mt-2 flex justify-center gap-2 text-xs">
+                    <button onClick={() => void updateSettings({ visualizerColor: "white" })} aria-pressed={vizColor === "white"} className={`rounded-full px-3 py-1.5 ${vizColor === "white" ? "bg-white/20 text-white" : "text-white/55 hover:text-white"}`}>Blanc</button>
+                    <button onClick={() => void updateSettings({ visualizerColor: "artwork" })} aria-pressed={vizColor === "artwork"} className={`rounded-full px-3 py-1.5 ${vizColor === "artwork" ? "bg-white/20 text-white" : "text-white/55 hover:text-white"}`}>Couleur de la pochette</button>
+                  </div>
                 </motion.div>
               )}
               {panel === "none" && upNext.length > 0 && (
-                <motion.div key="next" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full max-w-sm">
+                <motion.div key="next" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hidden w-full max-w-sm lg:block">
                   <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-white/60">À suivre</div>
                   <div className="space-y-2">
                     {upNext.map((q) => {
@@ -143,7 +153,8 @@ export default function NowPlaying() {
             <div className="mx-auto max-w-3xl">
               <div className="mb-4 flex items-end justify-between gap-4">
                 <div className="min-w-0">
-                  <h1 className="truncate text-3xl font-bold tracking-tight text-white">{track?.title ?? "—"}</h1>
+                  <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.24em] text-white/50">À l'écoute</div>
+                  <h1 className="truncate text-3xl font-extrabold tracking-[-0.04em] text-white">{track?.title ?? "—"}</h1>
                   <p className="truncate text-lg text-white/70">{track?.artist ?? ""}</p>
                 </div>
                 {track && (

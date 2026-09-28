@@ -16,6 +16,13 @@ use crate::settings::SettingsStore;
 
 const EQ_FREQS: [u32; 10] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
+struct Crossfade {
+    next_index: usize,
+    started_ms: u64,
+    duration_ms: u64,
+    handoff: bool,
+}
+
 struct Inner {
     status: String,
     current_track_id: Option<String>,
@@ -34,6 +41,9 @@ struct Inner {
     /// Entrée mpv en cours et entrée pré-chargée (avec l'index de file correspondant).
     cur_entry: Option<i64>,
     next_entry: Option<(i64, usize)>,
+    aux_prepared: Option<usize>,
+    crossfade: Option<Crossfade>,
+    crossfade_ms: u64,
     /// Le titre courant n'est pas encore chargé dans mpv (file ajoutée à l'arrêt, fin de file…).
     needs_load: bool,
 
@@ -57,6 +67,8 @@ struct Inner {
 pub struct Player {
     inner: Mutex<Inner>,
     mpv: Arc<Mpv>,
+    aux: Mutex<Option<Arc<Mpv>>>,
+    aux_socket: PathBuf,
     db: Arc<Db>,
     settings: Arc<SettingsStore>,
     app: AppHandle,
@@ -78,6 +90,10 @@ impl Player {
         }
         let (mpv, events) = Mpv::spawn(socket, &args)?;
 
+        let aux_socket = dirs::runtime_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join(format!("aura-mpv-crossfade-{}.sock", std::process::id()));
+
         let player = Arc::new(Player {
             inner: Mutex::new(Inner {
                 status: "stopped".into(),
@@ -95,6 +111,9 @@ impl Player {
                 uid_seq: 0,
                 cur_entry: None,
                 next_entry: None,
+                aux_prepared: None,
+                crossfade: None,
+                crossfade_ms: s.crossfade_ms,
                 needs_load: false,
                 listen_track: None,
                 listen_started: 0,
@@ -112,6 +131,8 @@ impl Player {
                 last_output: None,
             }),
             mpv,
+            aux: Mutex::new(None),
+            aux_socket,
             db,
             settings,
             app,
@@ -119,6 +140,10 @@ impl Player {
             media: Mutex::new(None),
         });
         player.apply_filters(&player.lock());
+        if s.crossfade_ms > 0 && player.ensure_aux().is_err() {
+            player.lock().crossfade_ms = 0;
+            player.settings.modify(|value| value.crossfade_ms = 0);
+        }
         player.restore_session();
 
         let weak = Arc::downgrade(&player);
@@ -138,6 +163,88 @@ impl Player {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn aux(&self) -> Option<Arc<Mpv>> {
+        self.aux.lock().unwrap().clone()
+    }
+
+    fn ensure_aux(&self) -> Result<(), String> {
+        let s = self.settings.get();
+        if s.audio_device.starts_with("alsa") {
+            return Err("Le fondu enchaîné nécessite une sortie partageable (PipeWire ou PulseAudio)".into());
+        }
+        if self.aux().is_some() { return Ok(()); }
+        let mut args = vec!["--volume=0".to_string(), format!("--replaygain={}", if s.replay_gain == "off" { "no" } else { &s.replay_gain })];
+        if !s.audio_device.is_empty() { args.push(format!("--audio-device={}", s.audio_device)); }
+        let (aux, events) = Mpv::spawn(self.aux_socket.clone(), &args)?;
+        std::thread::Builder::new().name("crossfade-events".into()).spawn(move || for _ in events {}).map_err(|e| e.to_string())?;
+        *self.aux.lock().unwrap() = Some(aux);
+        self.apply_filters(&self.lock());
+        Ok(())
+    }
+
+    fn stop_aux(&self, i: &mut Inner) {
+        if let Some(aux) = self.aux() {
+            aux.set("volume", json!(0));
+            aux.send(json!(["stop"]));
+        }
+        i.aux_prepared = None;
+    }
+
+    fn cancel_crossfade(&self, i: &mut Inner) {
+        if i.crossfade.take().is_some() || i.aux_prepared.is_some() {
+            self.stop_aux(i);
+            self.mpv.set("volume", json!(i.volume * 100.0));
+        }
+    }
+
+    fn prepare_aux(&self, i: &mut Inner) {
+        if i.crossfade_ms == 0 || i.crossfade.is_some() || i.radio_id.is_some() { return; }
+        let Some((_, n)) = i.next_entry else { self.stop_aux(i); return };
+        let Some(aux) = self.aux() else { return };
+        if i.aux_prepared == Some(n) { return; }
+        let Some(brief) = self.db.track_brief(&i.queue[n].track_id) else { return };
+        aux.set("pause", json!(true));
+        aux.set("volume", json!(0));
+        aux.set("mute", json!(i.muted));
+        if aux.loadfile(&brief.path, "replace", 0).is_some() { i.aux_prepared = Some(n); }
+    }
+
+    fn update_crossfade(&self, i: &mut Inner) {
+        if i.crossfade.is_none() && i.status == "playing" && i.crossfade_ms > 0
+            && i.position_ms >= i.duration_ms.saturating_sub(i.crossfade_ms) {
+            if let Some((_, next_index)) = i.next_entry.filter(|(_, n)| i.aux_prepared == Some(*n)) {
+                if let Some(next) = self.db.track_brief(&i.queue[next_index].track_id) {
+                    let fade_ms = i.crossfade_ms.min(i.duration_ms / 3).min(next.duration_ms / 3);
+                    if fade_ms >= 500 && i.position_ms >= i.duration_ms.saturating_sub(fade_ms) {
+                        if let Some(aux) = self.aux().filter(|aux| aux.get("idle-active").and_then(|v| v.as_bool()) == Some(false)) {
+                            aux.set("pause", json!(false));
+                            i.crossfade = Some(Crossfade { next_index, started_ms: i.position_ms, duration_ms: i.duration_ms.saturating_sub(i.position_ms).max(1), handoff: false });
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(fade) = &i.crossfade {
+            let progress = if fade.handoff { 1.0 } else { (i.position_ms.saturating_sub(fade.started_ms) as f64 / fade.duration_ms as f64).clamp(0.0, 1.0) };
+            let angle = progress * std::f64::consts::FRAC_PI_2;
+            self.mpv.set("volume", json!(i.volume * 100.0 * angle.cos()));
+            if let Some(aux) = self.aux() { aux.set("volume", json!(i.volume * 100.0 * angle.sin())); }
+        }
+    }
+
+    pub fn set_crossfade(&self, ms: u64) -> Result<(), String> {
+        let ms = ms.min(12_000);
+        if ms > 0 { self.ensure_aux()?; }
+        let mut i = self.lock();
+        self.cancel_crossfade(&mut i);
+        i.crossfade_ms = ms;
+        self.settings.modify(|s| s.crossfade_ms = ms);
+        if ms > 0 { self.prepare_aux(&mut i); }
+        else if let Some(aux) = self.aux.lock().unwrap().take() { aux.quit(); }
+        self.refresh_output(&mut i);
+        Ok(())
     }
 
     // ---------- état ----------
@@ -224,6 +331,7 @@ impl Player {
 
     /// Charge le titre courant de la file dans mpv, depuis `start_ms`.
     fn load_current(&self, i: &mut Inner, start_ms: u64, paused: bool) {
+        self.cancel_crossfade(i);
         self.finalize_listen(i);
         let Some(item) = i.queue.get(i.queue_index.max(0) as usize).cloned() else {
             self.stop_inner(i);
@@ -257,6 +365,8 @@ impl Player {
 
     /// Pré-charge le titre suivant dans la playlist mpv (enchaînement sans blanc).
     fn queue_next(&self, i: &mut Inner) {
+        if i.crossfade.as_ref().is_some_and(|fade| !fade.handoff) { self.cancel_crossfade(i); }
+        else if i.crossfade.is_none() { self.stop_aux(i); }
         i.next_entry = None;
         if i.radio_id.is_some() || i.needs_load || i.cur_entry.is_none() {
             return;
@@ -272,9 +382,11 @@ impl Player {
                 }
             }
         }
+        self.prepare_aux(i);
     }
 
     fn stop_inner(&self, i: &mut Inner) {
+        self.cancel_crossfade(i);
         self.finalize_listen(i);
         self.mpv.send(json!(["stop"]));
         i.status = "stopped".into();
@@ -336,6 +448,7 @@ impl Player {
         let mut i = self.lock();
         if i.status == "playing" {
             self.mpv.set("pause", json!(true));
+            if i.crossfade.is_some() { if let Some(aux) = self.aux() { aux.set("pause", json!(true)); } }
             i.status = "paused".into();
             self.emit_state(&i);
         }
@@ -345,6 +458,7 @@ impl Player {
         let mut i = self.lock();
         if i.radio_id.is_some() {
             self.mpv.set("pause", json!(false));
+            if i.crossfade.is_some() { if let Some(aux) = self.aux() { aux.set("pause", json!(false)); } }
             i.status = "playing".into();
         } else if i.current_track_id.is_some() {
             if i.needs_load {
@@ -352,6 +466,7 @@ impl Player {
                 self.load_current(&mut i, pos, false);
             } else {
                 self.mpv.set("pause", json!(false));
+                if i.crossfade.is_some() { if let Some(aux) = self.aux() { aux.set("pause", json!(false)); } }
                 i.status = "playing".into();
             }
         } else if !i.queue.is_empty() {
@@ -403,6 +518,7 @@ impl Player {
 
     pub fn seek(&self, ms: u64) {
         let mut i = self.lock();
+        self.cancel_crossfade(&mut i);
         let ms = if i.duration_ms > 0 { ms.min(i.duration_ms) } else { ms };
         i.position_ms = ms;
         i.last_pos = None;
@@ -411,6 +527,7 @@ impl Player {
         } else {
             self.mpv.send(json!(["seek", ms as f64 / 1000.0, "absolute+exact"]));
         }
+        self.prepare_aux(&mut i);
         let _ = self.app.emit("player:position", ms);
         self.emit_state(&i);
     }
@@ -422,8 +539,10 @@ impl Player {
         if v > 0.0 && i.muted {
             i.muted = false;
             self.mpv.set("mute", json!(false));
+            if let Some(aux) = self.aux() { aux.set("mute", json!(false)); }
         }
-        self.mpv.set("volume", json!(v * 100.0));
+        if i.crossfade.is_some() { self.update_crossfade(&mut i); }
+        else { self.mpv.set("volume", json!(v * 100.0)); }
         self.settings.modify(|s| s.volume = v);
         self.emit_state(&i);
         self.refresh_output(&mut i);
@@ -433,6 +552,7 @@ impl Player {
         let mut i = self.lock();
         i.muted = m;
         self.mpv.set("mute", json!(m));
+        if let Some(aux) = self.aux() { aux.set("mute", json!(m)); }
         self.emit_state(&i);
         self.refresh_output(&mut i);
     }
@@ -599,10 +719,14 @@ impl Player {
     }
 
     pub fn set_device(&self, id: String) {
+        if id.starts_with("alsa") && self.lock().crossfade_ms > 0 { let _ = self.set_crossfade(0); }
         let mut i = self.lock();
+        self.cancel_crossfade(&mut i);
         self.mpv.set("audio-device", json!(id));
+        if let Some(aux) = self.aux() { aux.set("audio-device", json!(id)); }
         i.audio_device = id.clone();
         self.settings.modify(|s| s.audio_device = id);
+        self.prepare_aux(&mut i);
         self.refresh_output(&mut i);
     }
 
@@ -622,6 +746,7 @@ impl Player {
         let active = i.eq.enabled && (i.eq.preamp != 0.0 || i.eq.bands.iter().any(|g| *g != 0.0));
         if !active {
             self.mpv.set("af", json!(""));
+            if let Some(aux) = self.aux() { aux.set("af", json!("")); }
             return;
         }
         let mut chain = vec![format!("volume={}dB", i.eq.preamp)];
@@ -630,12 +755,15 @@ impl Player {
                 chain.push(format!("equalizer=f={f}:t=o:w=1:g={g}"));
             }
         }
-        self.mpv.set("af", json!(format!("lavfi=[{}]", chain.join(","))));
+        let filter = format!("lavfi=[{}]", chain.join(","));
+        self.mpv.set("af", json!(filter));
+        if let Some(aux) = self.aux() { aux.set("af", json!(filter)); }
     }
 
     pub fn set_replay_gain(&self, mode: String) {
         let mut i = self.lock();
         self.mpv.set("replaygain", json!(if mode == "off" { "no" } else { mode.as_str() }));
+        if let Some(aux) = self.aux() { aux.set("replaygain", json!(if mode == "off" { "no" } else { mode.as_str() })); }
         i.replay_gain = mode;
         self.refresh_output(&mut i);
     }
@@ -674,6 +802,7 @@ impl Player {
         let out_fmt = out["format"].as_str().unwrap_or("");
         let untouched = !(i.eq.enabled && (i.eq.preamp != 0.0 || i.eq.bands.iter().any(|g| *g != 0.0)))
             && i.replay_gain == "off"
+            && i.crossfade_ms == 0
             && (i.volume - 1.0).abs() < 1e-6
             && !i.muted
             && out["samplerate"].as_u64() == inp["samplerate"].as_u64()
@@ -706,6 +835,12 @@ impl Player {
                 let entry = ev["playlist_entry_id"].as_i64();
                 if let (Some(e), Some((next_id, n))) = (entry, i.next_entry) {
                     if e == next_id {
+                        if let Some(fade) = &mut i.crossfade {
+                            if fade.next_index == n {
+                                fade.handoff = true;
+                                self.mpv.set("volume", json!(0));
+                            }
+                        }
                         // Enchaînement naturel vers le titre pré-chargé.
                         self.finalize_listen(&mut i);
                         if let Some(cur) = i.current_track_id.clone() {
@@ -724,6 +859,18 @@ impl Player {
                         self.queue_next(&mut i);
                         self.emit_state(&i);
                     }
+                }
+            }
+            "file-loaded" => {
+                if let Some(fade) = i.crossfade.as_ref().filter(|fade| fade.handoff) {
+                    let skip_ms = fade.duration_ms;
+                    let _ = self.mpv.call(json!(["seek", skip_ms as f64 / 1000.0, "absolute+exact"]));
+                    i.position_ms = skip_ms;
+                    self.mpv.set("volume", json!(i.volume * 100.0));
+                    self.stop_aux(&mut i);
+                    i.crossfade = None;
+                    self.prepare_aux(&mut i);
+                    let _ = self.app.emit("player:position", i.position_ms);
                 }
             }
             "end-file" => {
@@ -783,6 +930,7 @@ impl Player {
                 }
                 i.last_pos = Some(pos);
                 i.position_ms = (pos * 1000.0) as u64;
+                self.update_crossfade(i);
                 if i.last_pos_emit.elapsed() >= Duration::from_millis(200) {
                     i.last_pos_emit = Instant::now();
                     let _ = self.app.emit("player:position", i.position_ms);
@@ -929,5 +1077,6 @@ impl Player {
             self.save_session(&i);
         }
         self.mpv.quit();
+        if let Some(aux) = self.aux.lock().unwrap().take() { aux.quit(); }
     }
 }

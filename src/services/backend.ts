@@ -25,6 +25,7 @@ import type {
   Settings,
   SortSpec,
   Track,
+  TagPatch,
 } from "../types"
 
 export type Unsubscribe = () => void
@@ -47,11 +48,14 @@ export interface MusicBackend {
     getArtist(id: string): Promise<{ artist: Artist; albums: Album[]; topTracks: Track[]; similar: Artist[] } | null>
     getFolders(): Promise<FolderNode[]>
     search(text: string): Promise<SearchResults>
+    searchLyrics(text: string): Promise<Track[]>
     getStats(): Promise<LibraryStats>
     getRecentlyAdded(): Promise<Album[]>
     getMostPlayed(): Promise<Track[]>
     getRediscover(): Promise<Album[]>
     rescan(): Promise<void>
+    updateTags(trackId: string, patch: TagPatch): Promise<void>
+    setAlbumCover(albumId: string, path: string): Promise<void>
     onScanProgress(cb: (p: ScanProgress) => void): Unsubscribe
     /** Fired when the library content changed (scan finished, folder added…). */
     onChanged(cb: () => void): Unsubscribe
@@ -150,5 +154,10 @@ export interface MusicBackend {
     openInFileManager(path: string): Promise<void>
     /** Native folder picker: path, null if cancelled, undefined if no native picker exists. */
     pickFolder(): Promise<string | null | undefined>
+    pickImage(): Promise<string | null>
+    pickBackupFolder(title?: string): Promise<string | null>
+    openProject(): Promise<void>
+    createBackup(directory: string): Promise<string>
+    prepareRestore(directory: string): Promise<void>
   }
 }

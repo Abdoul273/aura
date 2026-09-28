@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod backup;
 mod db;
 mod download;
 mod lyrics;
@@ -38,6 +39,9 @@ fn main() {
             for d in [&data_dir, &config_dir, &cache_dir] {
                 std::fs::create_dir_all(d)?;
             }
+            if let Err(error) = backup::apply_pending(&data_dir, &config_dir, &cache_dir) {
+                eprintln!("Restauration Aura non appliquée : {error}");
+            }
             let cover_dir = cache_dir.join("covers");
             std::fs::create_dir_all(&cover_dir)?;
             let _ = app.asset_protocol_scope().allow_directory(&cover_dir, true);
@@ -72,11 +76,16 @@ fn main() {
             library_snapshot,
             library_rescan,
             library_is_scanning,
+            library_update_tags,
+            library_set_cover,
+            system_create_backup,
+            system_prepare_restore,
             favorites_toggle,
             favorites_list,
             stats_plays,
             lyrics_get,
             lyrics_search,
+            lyrics_search_library,
             lyrics_choose,
             download_search,
             download_probe,

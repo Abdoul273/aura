@@ -124,6 +124,33 @@ pub fn builtin_presets() -> Vec<EqPreset> {
 }
 
 impl Db {
+    pub fn remove_folder_tracks(&self, folder: &Path) -> rusqlite::Result<()> {
+        let mut conn = self.conn();
+        let paths: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT path FROM tracks")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let all: Vec<String> = rows.collect::<Result<_, _>>()?;
+            all.into_iter().filter(|path| Path::new(path).starts_with(folder)).collect()
+        };
+        let tx = conn.transaction()?;
+        for path in paths { tx.execute("DELETE FROM tracks WHERE path = ?1", [path])?; }
+        tx.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)", [])?;
+        tx.commit()
+    }
+
+    pub fn backup_to(&self, path: &Path) -> rusqlite::Result<()> {
+        self.conn().execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])?;
+        Ok(())
+    }
+
+    pub fn set_album_cover(&self, id: &str, colors: &AlbumColors) -> rusqlite::Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE albums SET has_cover = 1, dominant = ?2, accent = ?3, muted = ?4 WHERE id = ?1",
+            params![id, colors.dominant, colors.accent, colors.muted],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn open(path: &Path) -> rusqlite::Result<Db> {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;

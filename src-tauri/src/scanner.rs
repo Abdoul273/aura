@@ -145,7 +145,8 @@ pub fn scan(conn: &mut Connection, folders: &[String], cover_dir: &Path, progres
 
     // 1. Inventaire du disque.
     let mut on_disk: Vec<(PathBuf, std::fs::Metadata)> = Vec::new();
-    for root in folders {
+    let available_roots: Vec<&Path> = folders.iter().map(Path::new).filter(|root| root.is_dir()).collect();
+    for root in &available_roots {
         for entry in WalkDir::new(root).follow_links(true).into_iter().filter_map(Result::ok) {
             if entry.file_type().is_file() && is_audio(entry.path()) {
                 if let Ok(meta) = entry.metadata() {
@@ -162,7 +163,10 @@ pub fn scan(conn: &mut Connection, folders: &[String], cover_dir: &Path, progres
         rows.collect::<Result<_, _>>()?
     };
     let disk_paths: HashSet<String> = on_disk.iter().map(|(p, _)| p.to_string_lossy().into_owned()).collect();
-    let removed: Vec<String> = known.keys().filter(|p| !disk_paths.contains(*p)).cloned().collect();
+    // Un disque externe absent n'est pas une demande de suppression.
+    let removed: Vec<String> = known.keys()
+        .filter(|p| available_roots.iter().any(|root| Path::new(p).starts_with(root)) && !disk_paths.contains(*p))
+        .cloned().collect();
     let todo: Vec<&(PathBuf, std::fs::Metadata)> = on_disk
         .iter()
         .filter(|(p, m)| known.get(p.to_string_lossy().as_ref()) != Some(&mtime_of(m)))
@@ -237,35 +241,47 @@ pub fn scan(conn: &mut Connection, folders: &[String], cover_dir: &Path, progres
     }
     tx.commit()?;
 
-    // 5. Pochettes des albums nouveaux.
-    let missing: Vec<(String, Vec<String>)> = {
+    // 5. Pochettes nouvelles, ajoutées depuis un précédent scan ou absentes du cache.
+    let changed_albums: HashSet<String> = scanned.iter().map(|t| album_id(&t.album_artist, &t.album)).collect();
+    let missing: Vec<(String, Vec<String>, Option<bool>)> = {
         let mut stmt = conn.prepare(
-            "SELECT album_id, group_concat(path, char(10)) FROM tracks
-             WHERE album_id NOT IN (SELECT id FROM albums) GROUP BY album_id",
+            "SELECT t.album_id, group_concat(t.path, char(10)), a.has_cover
+             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
+             GROUP BY t.album_id",
         )?;
         let rows = stmt.query_map([], |r| {
             let paths: String = r.get(1)?;
-            Ok((r.get::<_, String>(0)?, paths.split('\n').map(String::from).collect()))
+            Ok((r.get::<_, String>(0)?, paths.split('\n').map(String::from).collect(), r.get(2)?))
         })?;
-        rows.collect::<Result<_, _>>()?
+        let candidates: Vec<(String, Vec<String>, Option<bool>)> = rows.collect::<Result<_, _>>()?;
+        candidates.into_iter().filter(|(id, paths, has)| {
+            has.is_none()
+                || (has == &Some(true) && {
+                    let cached = cover_dir.join(format!("{id}.jpg"));
+                    !cached.exists() || folder_cover_newer(paths, &cached)
+                })
+                || (has == &Some(false) && (changed_albums.contains(id) || folder_cover_exists(paths)))
+        }).collect()
     };
+    let mut cover_changed = false;
     if !missing.is_empty() {
         let _ = std::fs::create_dir_all(cover_dir);
-        let covers: Vec<(String, bool, AlbumColors)> = missing
+        let covers: Vec<(String, bool, AlbumColors, Option<bool>)> = missing
             .par_iter()
-            .map(|(id, paths)| match find_cover(paths) {
+            .map(|(id, paths, previous)| match find_cover(paths) {
                 Some(img) => {
                     let colors = palette_from_image(&img);
                     let ok = save_cover(&img, &cover_dir.join(format!("{id}.jpg")));
-                    (id.clone(), ok, colors)
+                    (id.clone(), ok, colors, *previous)
                 }
-                None => (id.clone(), false, palette_from_seed(id)),
+                None => (id.clone(), false, palette_from_seed(id), *previous),
             })
             .collect();
+        cover_changed = covers.iter().any(|(_, has, _, previous)| previous.is_none() || *previous != Some(*has) || *has);
         let tx = conn.transaction()?;
         {
             let mut ins = tx.prepare("INSERT OR REPLACE INTO albums VALUES (?1, ?2, ?3, ?4, ?5)")?;
-            for (id, has, c) in &covers {
+            for (id, has, c, _) in &covers {
                 ins.execute(params![id, has, c.dominant, c.accent, c.muted])?;
             }
         }
@@ -273,14 +289,14 @@ pub fn scan(conn: &mut Connection, folders: &[String], cover_dir: &Path, progres
     }
 
     progress(ScanProgress { scanning: false, current: total, total, current_path: String::new() });
-    Ok(ScanOutcome { changed: changed || !missing.is_empty() })
+    Ok(ScanOutcome { changed: changed || cover_changed })
 }
 
 // ---------- pochettes ----------
 
 fn find_cover(paths: &[String]) -> Option<DynamicImage> {
     // Image intégrée : on privilégie la face avant.
-    for p in paths.iter().take(4) {
+    for p in paths {
         if let Ok(tagged) = lofty::read_from_path(p) {
             let pics: Vec<_> = tagged.tags().iter().flat_map(|t| t.pictures().iter()).collect();
             let best = pics.iter().find(|p| p.pic_type() == PictureType::CoverFront).or(pics.first());
@@ -291,20 +307,40 @@ fn find_cover(paths: &[String]) -> Option<DynamicImage> {
             }
         }
     }
-    // Image dans le dossier (cover.jpg, folder.png…), sauf dossiers « fourre-tout ».
-    let dir = Path::new(paths.first()?).parent()?;
-    let entries = std::fs::read_dir(dir).ok()?;
-    for e in entries.filter_map(Result::ok) {
-        let p = e.path();
-        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-        let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-        if COVER_NAMES.contains(&stem.as_str()) && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp") {
-            if let Ok(img) = image::open(&p) {
-                return Some(img);
+    // Image dans un des dossiers de l'album (cover.jpg, folder.png…).
+    for path in folder_cover_candidates(paths) {
+        if let Ok(img) = image::open(path) { return Some(img); }
+    }
+    None
+}
+
+fn folder_cover_exists(paths: &[String]) -> bool {
+    !folder_cover_candidates(paths).is_empty()
+}
+
+fn folder_cover_newer(paths: &[String], cached: &Path) -> bool {
+    let Some(cache_time) = std::fs::metadata(cached).and_then(|m| m.modified()).ok() else { return false };
+    folder_cover_candidates(paths).iter().any(|path| {
+        std::fs::metadata(path).and_then(|m| m.modified()).is_ok_and(|time| time > cache_time)
+    })
+}
+
+fn folder_cover_candidates(paths: &[String]) -> Vec<PathBuf> {
+    let dirs: HashSet<PathBuf> = paths.iter().filter_map(|p| Path::new(p).parent().map(Path::to_path_buf)).collect();
+    let mut candidates = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+            if COVER_NAMES.contains(&stem.as_str()) && matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp") {
+                candidates.push(path);
             }
         }
     }
-    None
+    candidates.sort();
+    candidates
 }
 
 /// Écriture atomique (fichier temporaire puis renommage) : un lecteur externe
@@ -322,6 +358,17 @@ fn save_cover(img: &DynamicImage, dest: &Path) -> bool {
     }
     let _ = std::fs::remove_file(&tmp);
     false
+}
+
+pub fn import_cover(source: &Path, dest: &Path) -> Result<AlbumColors, String> {
+    let image = image::open(source).map_err(|e| format!("Image illisible : {e}"))?;
+    let side = image.width().min(image.height());
+    let image = image.crop_imm((image.width() - side) / 2, (image.height() - side) / 2, side, side);
+    let colors = palette_from_image(&image);
+    if !save_cover(&image, dest) {
+        return Err("Impossible d'enregistrer la pochette".into());
+    }
+    Ok(colors)
 }
 
 // ---------- couleurs ----------

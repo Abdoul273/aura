@@ -17,6 +17,7 @@ import Modal from "../../components/Modal"
 import { useSettings } from "../../store/settingsStore"
 import { useLibrary } from "../../store/libraryStore"
 import { cn } from "../../utils/cn"
+import packageInfo from "../../../package.json"
 
 /* ---------- Reusable controls ---------- */
 
@@ -45,12 +46,14 @@ function Slider({
   max,
   step = 1,
   onChange,
+  onCommit,
 }: {
   value: number
   min: number
   max: number
   step?: number
   onChange: (v: number) => void
+  onCommit?: (v: number) => void
 }) {
   const pct = ((value - min) / (max - min)) * 100
   return (
@@ -62,6 +65,9 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        onPointerUp={(e) => onCommit?.(Number(e.currentTarget.value))}
+        onKeyUp={(e) => onCommit?.(Number(e.currentTarget.value))}
+        onBlur={(e) => onCommit?.(Number(e.currentTarget.value))}
         className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
       />
       <div className="pointer-events-none absolute left-0 top-1/2 h-1.5 w-full -translate-y-1/2 overflow-hidden rounded-full bg-white/10">
@@ -226,6 +232,9 @@ function LibraryTab({ s, update }: { s: AppSettings; update: (p: Partial<AppSett
 
 function PlaybackTab({ s, update }: { s: AppSettings; update: (p: Partial<AppSettings>) => void }) {
   const [devices, setDevices] = useState<AudioDevice[]>([])
+  const [audioError, setAudioError] = useState("")
+  const [fadeDraft, setFadeDraft] = useState(s.crossfadeMs)
+  useEffect(() => setFadeDraft(s.crossfadeMs), [s.crossfadeMs])
   useEffect(() => {
     void backend.audio.getDevices().then(setDevices)
   }, [])
@@ -238,24 +247,31 @@ function PlaybackTab({ s, update }: { s: AppSettings; update: (p: Partial<AppSet
 
   const selectDevice = async (id: string) => {
     await backend.audio.setDevice(id)
+    if (id.startsWith("alsa") && s.crossfadeMs > 0) update({ crossfadeMs: 0 })
     setDevices((prev) => prev.map((d) => ({ ...d, active: d.id === id })))
+  }
+
+  const commitCrossfade = (v: number) => {
+    if (v === s.crossfadeMs) return
+    void backend.audio.setCrossfade(v)
+      .then(() => { setAudioError(""); update({ crossfadeMs: v }) })
+      .catch((error) => { setAudioError(String(error)); setFadeDraft(s.crossfadeMs) })
   }
 
   return (
     <div className="divide-y divide-[var(--glass-border)]">
-      <Row label="Fondu enchaîné" hint="Transition entre les pistes">
+      <Row label="Fondu enchaîné" hint="Transition entre les pistes · sortie PipeWire ou PulseAudio">
         <Slider
-          value={s.crossfadeMs}
+          value={fadeDraft}
           min={0}
           max={12000}
           step={500}
-          onChange={(v) => {
-            void backend.audio.setCrossfade(v)
-            update({ crossfadeMs: v })
-          }}
+          onChange={setFadeDraft}
+          onCommit={commitCrossfade}
         />
-        <span className="tnum w-14 text-right text-sm tabular-nums text-mid">{(s.crossfadeMs / 1000).toFixed(1)} s</span>
+        <span className="tnum w-14 text-right text-sm tabular-nums text-mid">{(fadeDraft / 1000).toFixed(1)} s</span>
       </Row>
+      {audioError && <p role="alert" className="py-2 text-xs text-red-400">{audioError}</p>}
 
       <Row label="Sans blanc (gapless)" hint="Lecture continue sans silence">
         <Toggle
@@ -427,13 +443,35 @@ function ShortcutsTab() {
 }
 
 function AboutTab() {
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState("")
+  const createBackup = async () => {
+    const directory = await backend.system.pickBackupFolder("Où enregistrer la sauvegarde Aura ?")
+    if (!directory) return
+    setBusy(true)
+    try {
+      const path = await backend.system.createBackup(directory)
+      setMessage(`Sauvegarde créée : ${path}`)
+    } catch (error) { setMessage(`Échec de la sauvegarde : ${String(error)}`) }
+    finally { setBusy(false) }
+  }
+  const restore = async () => {
+    const directory = await backend.system.pickBackupFolder("Choisir le dossier Aura-sauvegarde à restaurer")
+    if (!directory) return
+    setBusy(true)
+    try {
+      await backend.system.prepareRestore(directory)
+      setMessage("Sauvegarde vérifiée. Fermez puis rouvrez Aura pour appliquer la restauration.")
+    } catch (error) { setMessage(`Restauration impossible : ${String(error)}`) }
+    finally { setBusy(false) }
+  }
   return (
     <div className="glass rounded-2xl p-8 text-center">
       <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl text-2xl font-bold text-black" style={{ background: "var(--accent)" }}>
         A
       </div>
       <h2 className="text-xl font-semibold text-hi">Aura</h2>
-      <p className="text-sm text-mid">Version 1.0.0</p>
+      <p className="text-sm text-mid">Version {packageInfo.version}</p>
       <p className="mx-auto mt-4 max-w-md text-sm text-mid">
         Lecteur de musique local haute-fidélité pour Linux. Conçu pour votre collection, avec un rendu soigné et une
         lecture sans compromis.
@@ -441,9 +479,20 @@ function AboutTab() {
       <div className="mx-auto mt-6 max-w-md text-xs text-lo">
         React · TypeScript · Tailwind CSS · Framer Motion · Zustand
       </div>
-      <p className="mx-auto mt-4 max-w-md text-xs text-lo">
-        Le moteur audio est fourni séparément — le backend est entièrement interchangeable.
-      </p>
+      <div className="mx-auto mt-8 max-w-lg border-t border-[var(--glass-border)] pt-6 text-left">
+        <h3 className="text-sm font-semibold text-hi">Vos données</h3>
+        <p className="mt-1 text-xs leading-relaxed text-mid">La sauvegarde contient la bibliothèque, les favoris, les playlists, les statistiques, les réglages et les pochettes personnalisées. La restauration s'applique au prochain démarrage.</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button disabled={busy} onClick={() => void createBackup()} className="focus-ring rounded-full bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">Créer une sauvegarde</button>
+          <button disabled={busy} onClick={() => void restore()} className="focus-ring rounded-full border border-[var(--glass-border)] px-4 py-2 text-xs font-semibold text-hi hover:bg-white/10 disabled:opacity-50">Restaurer une sauvegarde</button>
+        </div>
+        {message && <p role="status" className="mt-3 break-all text-xs text-mid">{message}</p>}
+      </div>
+      <div className="mx-auto mt-6 max-w-lg border-t border-[var(--glass-border)] pt-6 text-left">
+        <h3 className="text-sm font-semibold text-hi">Mises à jour</h3>
+        <p className="mt-1 text-xs text-mid">Dans le dossier du projet, lancez <code>git pull</code> puis <code>./install.sh --no-update</code>. Vos données sont conservées.</p>
+        <button onClick={() => void backend.system.openProject().catch((error) => setMessage(String(error)))} className="focus-ring mt-3 rounded-full border border-[var(--glass-border)] px-4 py-2 text-xs font-semibold text-hi hover:bg-white/10">Ouvrir le projet Aura</button>
+      </div>
     </div>
   )
 }
@@ -464,8 +513,8 @@ export default function Settings() {
         <p className="text-sm text-mid">Personnalisez Aura selon vos préférences.</p>
       </div>
 
-      <div className="flex gap-8">
-        <nav className="w-52 shrink-0">
+      <div className="flex flex-col gap-5 lg:flex-row lg:gap-8">
+        <nav className="flex w-full shrink-0 flex-wrap gap-1 lg:block lg:w-52">
           {TABS.map((t) => {
             const Icon = t.icon
             const active = tab === t.id

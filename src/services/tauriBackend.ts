@@ -6,7 +6,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
-import { revealItemInDir } from "@tauri-apps/plugin-opener"
+import { revealItemInDir, openUrl } from "@tauri-apps/plugin-opener"
 import type { MusicBackend, SearchResults, Unsubscribe } from "./backend"
 import type {
   Album,
@@ -32,6 +32,7 @@ import type {
   Settings,
   SortSpec,
   Track,
+  TagPatch,
 } from "../types"
 import { paletteFromSeed } from "../utils/color"
 
@@ -129,6 +130,7 @@ function buildIndex(snap: Snapshot) {
       title: r.title,
       artist: r.artist,
       artistId: artistId(r.artist),
+      albumArtist: r.albumArtist,
       album: r.album,
       albumId: r.albumId,
       trackNumber: r.trackNumber,
@@ -439,6 +441,10 @@ export const tauriBackend: MusicBackend = {
       else if (found.playlists[0]) best = { kind: "playlist", id: found.playlists[0].id }
       return { ...found, best }
     },
+    async searchLyrics(text) {
+      const ids = await invoke<string[]>("lyrics_search_library", { query: text })
+      return ids.map((id) => trackById.get(id)).filter((track): track is Track => !!track).sort((a, b) => a.title.localeCompare(b.title, "fr"))
+    },
     async getStats(): Promise<LibraryStats> {
       const ps = await invoke<PlayStats>("stats_plays", { tzOffsetMin: -new Date().getTimezoneOffset() })
       const msByTrack = new Map(ps.trackMs)
@@ -499,6 +505,14 @@ export const tauriBackend: MusicBackend = {
     },
     async rescan() {
       await invoke<void>("library_rescan")
+      await reloadLibrary()
+    },
+    async updateTags(trackId: string, patch: TagPatch) {
+      await invoke<void>("library_update_tags", { trackId, patch })
+      await reloadLibrary()
+    },
+    async setAlbumCover(albumId: string, path: string) {
+      await invoke<void>("library_set_cover", { albumId, path })
       await reloadLibrary()
     },
     onScanProgress(cb) {
@@ -670,6 +684,17 @@ export const tauriBackend: MusicBackend = {
       const res = await openDialog({ directory: true, multiple: false, title: "Choisir un dossier de musique" })
       return typeof res === "string" ? res : null
     },
+    async pickImage() {
+      const res = await openDialog({ multiple: false, title: "Choisir une pochette", filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "bmp", "gif"] }] })
+      return typeof res === "string" ? res : null
+    },
+    async pickBackupFolder(title) {
+      const res = await openDialog({ directory: true, multiple: false, title: title ?? "Choisir un dossier de sauvegarde Aura" })
+      return typeof res === "string" ? res : null
+    },
+    openProject: () => openUrl("https://github.com/Abdoul273/aura"),
+    createBackup: (directory) => invoke<string>("system_create_backup", { directory }),
+    prepareRestore: (directory) => invoke<void>("system_prepare_restore", { directory }),
   },
 }
 

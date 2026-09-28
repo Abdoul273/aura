@@ -93,6 +93,12 @@ pub struct Settings {
     pub gapless: bool,
     pub replay_gain: String,
     pub music_folders: Vec<String>,
+    #[serde(default)]
+    pub smart_views: Vec<SmartView>,
+    #[serde(default = "default_visualizer_mode")]
+    pub visualizer_mode: String,
+    #[serde(default = "default_visualizer_color")]
+    pub visualizer_color: String,
     // Hors contrat TS : état audio persistant.
     #[serde(default = "default_volume")]
     pub volume: f64,
@@ -100,9 +106,23 @@ pub struct Settings {
     pub audio_device: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartView {
+    pub id: String,
+    pub name: String,
+    pub view: String,
+    pub query: String,
+    pub genre: String,
+    pub quality: String,
+}
+
 fn default_volume() -> f64 {
     0.8
 }
+
+fn default_visualizer_mode() -> String { "bars".into() }
+fn default_visualizer_color() -> String { "white".into() }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -123,6 +143,9 @@ impl Default for Settings {
             gapless: true,
             replay_gain: "off".into(),
             music_folders: music.into_iter().collect(),
+            smart_views: vec![],
+            visualizer_mode: default_visualizer_mode(),
+            visualizer_color: default_visualizer_color(),
             volume: default_volume(),
             audio_device: String::new(),
         }

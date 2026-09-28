@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Speaker, Headphones, MonitorSpeaker, Bluetooth, Check } from "lucide-react"
 import { backend } from "../services"
+import { useSettings } from "../store/settingsStore"
 import type { AudioDevice } from "../types"
 import Tooltip from "./Tooltip"
 
@@ -11,6 +12,7 @@ export default function DevicePicker() {
   const [open, setOpen] = useState(false)
   const [devices, setDevices] = useState<AudioDevice[]>([])
   const ref = useRef<HTMLDivElement>(null)
+  const loadSettings = useSettings((s) => s.load)
 
   const refresh = () => backend.audio.getDevices().then(setDevices)
   useEffect(() => {
@@ -49,6 +51,7 @@ export default function DevicePicker() {
                   key={d.id}
                   onClick={async () => {
                     await backend.audio.setDevice(d.id)
+                    await loadSettings()
                     refresh()
                     setOpen(false)
                   }}

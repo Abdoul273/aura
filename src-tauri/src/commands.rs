@@ -7,6 +7,10 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+use lofty::prelude::*;
+use lofty::probe::Probe;
+use lofty::tag::{ItemKey, Tag};
+use lofty::config::WriteOptions;
 
 use crate::db::Db;
 use crate::models::*;
@@ -14,7 +18,7 @@ use crate::player::Player;
 use crate::settings::SettingsStore;
 use crate::visualizer::Visualizer;
 use crate::download::{DlJob, DlResult, Downloader};
-use crate::{lyrics, scanner};
+use crate::{backup, lyrics, scanner};
 
 pub struct AppState {
     pub db: Arc<Db>,
@@ -81,6 +85,81 @@ pub async fn library_rescan(app: AppHandle, st: S<'_>) -> Res<()> {
 #[tauri::command]
 pub async fn library_is_scanning(st: S<'_>) -> Res<bool> {
     Ok(st.scanning.load(Ordering::SeqCst))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagPatch {
+    title: String,
+    artist: String,
+    album: String,
+    album_artist: String,
+    genre: String,
+    year: u32,
+    track_number: u32,
+    disc_number: u32,
+}
+
+#[tauri::command]
+pub async fn library_update_tags(app: AppHandle, st: S<'_>, track_id: String, patch: TagPatch) -> Res<()> {
+    if st.scanning.load(Ordering::SeqCst) {
+        return Err("Attendez la fin du scan avant de modifier les tags".into());
+    }
+    if patch.title.trim().is_empty() || patch.artist.trim().is_empty() || patch.album.trim().is_empty() {
+        return Err("Le titre, l'artiste et l'album sont obligatoires".into());
+    }
+    let path = st.db.track_brief(&track_id).ok_or("Titre introuvable")?.path;
+    let st = st.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut tagged = Probe::open(&path).map_err(err)?.read().map_err(err)?;
+        if tagged.primary_tag().is_none() {
+            tagged.insert_tag(Tag::new(tagged.primary_tag_type()));
+        }
+        let tag = tagged.primary_tag_mut().ok_or("Tags non pris en charge")?;
+        tag.set_title(patch.title.trim().to_owned());
+        tag.set_artist(patch.artist.trim().to_owned());
+        tag.set_album(patch.album.trim().to_owned());
+        tag.insert_text(ItemKey::AlbumArtist, patch.album_artist.trim().to_owned());
+        tag.insert_text(ItemKey::Genre, patch.genre.trim().to_owned());
+        tag.insert_text(ItemKey::Year, patch.year.to_string());
+        tag.insert_text(ItemKey::TrackNumber, patch.track_number.to_string());
+        tag.insert_text(ItemKey::DiscNumber, patch.disc_number.max(1).to_string());
+        tagged.save_to_path(&path, WriteOptions::default()).map_err(err)?;
+        run_scan(&app, &st)
+    }).await.map_err(err)?
+}
+
+#[tauri::command]
+pub async fn library_set_cover(app: AppHandle, st: S<'_>, album_id: String, path: String) -> Res<()> {
+    if !st.db.snapshot_albums().map_err(err)?.iter().any(|a| a.id == album_id) {
+        return Err("Album introuvable".into());
+    }
+    let colors = scanner::import_cover(std::path::Path::new(&path), &st.cover_dir.join(format!("{album_id}.jpg")))?;
+    st.db.set_album_cover(&album_id, &colors).map_err(err)?;
+    let _ = app.emit("library:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn lyrics_search_library(st: S<'_>, query: String) -> Res<Vec<String>> {
+    let st = st.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || lyrics::search_library(&st.db, &st.lyrics_dir, &query)).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn system_create_backup(st: S<'_>, directory: String) -> Res<String> {
+    let settings = serde_json::to_string_pretty(&st.settings.get()).map_err(err)?;
+    let db = st.db.clone();
+    let covers = st.cover_dir.clone();
+    let folder = std::path::PathBuf::from(directory);
+    let path = tauri::async_runtime::spawn_blocking(move || backup::create(&db, &settings, &covers, &folder)).await.map_err(err)??;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn system_prepare_restore(app: AppHandle, directory: String) -> Res<()> {
+    let config = app.path().app_config_dir().map_err(err)?;
+    tauri::async_runtime::spawn_blocking(move || backup::prepare_restore(std::path::Path::new(&directory), &config)).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -349,8 +428,7 @@ pub async fn audio_set_replay_gain(st: S<'_>, mode: String) -> Res<()> {
 
 #[tauri::command]
 pub async fn audio_set_crossfade(st: S<'_>, ms: u64) -> Res<()> {
-    st.settings.modify(|s| s.crossfade_ms = ms);
-    Ok(())
+    st.player.set_crossfade(ms)
 }
 
 #[tauri::command]
@@ -425,6 +503,8 @@ pub async fn settings_add_folder(app: AppHandle, st: S<'_>, path: String) -> Res
 #[tauri::command]
 pub async fn settings_remove_folder(app: AppHandle, st: S<'_>, path: String) -> Res<()> {
     st.settings.modify(|s| s.music_folders.retain(|f| f != &path));
+    st.db.remove_folder_tracks(std::path::Path::new(&path)).map_err(err)?;
+    let _ = app.emit("library:changed", ());
     spawn_scan(&app);
     Ok(())
 }

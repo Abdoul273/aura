@@ -34,7 +34,8 @@ npm run tauri dev      # fenêtre de l'application avec rechargement à chaud
 ## Moteur (src-tauri)
 
 - **Audio** : un processus `mpv` piloté par IPC JSON. Le titre suivant est
-  pré-chargé pour l'enchaînement sans blanc ; égaliseur 10 bandes (filtres
+  pré-chargé pour l'enchaînement sans blanc ; un second flux temporaire réalise
+  le fondu enchaîné sur PipeWire ou PulseAudio ; égaliseur 10 bandes (filtres
   lavfi), ReplayGain, choix de la sortie (PipeWire ou ALSA direct), état
   bit-perfect calculé à partir des formats d'entrée/sortie réels.
 - **Bibliothèque** : scan incrémental (mtime) des dossiers configurés, tags
@@ -48,8 +49,8 @@ npm run tauri dev      # fenêtre de l'application avec rechargement à chaud
   uniquement quand un visualiseur est affiché.
 - La file d'attente et la position sont restaurées au démarrage.
 
-Limite connue : le fondu enchaîné (crossfade) est enregistré dans les
-paramètres mais pas encore appliqué par le moteur.
+Le fondu enchaîné est désactivé sur une sortie ALSA directe, qui ne peut pas
+toujours être partagée entre deux flux. Aura conserve alors la lecture sans blanc.
 
 ## Pile technique
 
@@ -105,6 +106,20 @@ lecteur, table virtualisée 60 fps, palette de commandes (Ctrl K), menus
 contextuels, glisser-déposer vers les playlists, égaliseur 10 bandes,
 statistiques en SVG, thème clair/sombre, couleur dynamique extraite de la
 pochette, raccourcis clavier et `prefers-reduced-motion`.
+
+La page Titres propose des filtres combinables, des vues intelligentes
+enregistrées et un repérage non destructif des doublons possibles. Les tags
+se modifient depuis les propriétés d'un titre et la pochette se choisit depuis
+la page album. La recherche Paroles couvre les paroles déjà chargées et les
+fichiers `.lrc`/`.txt` locaux, sans lancer de requêtes réseau.
+Le visualiseur mémorise son mode et peut prendre la couleur de la pochette.
+Un dossier musical temporairement indisponible reste dans la bibliothèque ;
+le retirer dans les paramètres supprime ses entrées.
+
+Dans Paramètres → À propos, une sauvegarde exporte la base SQLite, les réglages
+et les pochettes personnalisées vers un dossier `Aura-sauvegarde-*`. Pour
+restaurer, choisissez ce dossier puis fermez et relancez Aura. La version
+précédente de la base reste dans `aura.db.before-restore`.
 
 ### Raccourcis
 

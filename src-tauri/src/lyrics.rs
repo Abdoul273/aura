@@ -8,6 +8,7 @@
 // En dernier recours, la recherche manuelle (`search` / `choose`) laisse l'utilisateur choisir.
 
 use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
@@ -25,6 +26,37 @@ const APPROX_SYNC_S: f64 = 45.0;
 const RETRY_AFTER: Duration = Duration::from_secs(24 * 3600);
 const CACHE_VERSION: &str = "v4";
 const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
+
+/// Recherche hors ligne dans les paroles en cache et les fichiers voisins.
+pub fn search_library(db: &Db, cache_dir: &Path, query: &str) -> Vec<String> {
+    let needle = query.trim().to_lowercase();
+    if needle.chars().count() < 3 { return vec![]; }
+    let mut found = HashSet::new();
+    if let Ok(entries) = std::fs::read_dir(cache_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let Some(id) = name.strip_prefix(&format!("{CACHE_VERSION}-")).and_then(|s| s.strip_suffix(".json")) else { continue };
+            if std::fs::read_to_string(entry.path()).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .and_then(|value| value["text"].as_str().map(|s| s.to_lowercase().contains(&needle))) == Some(true) {
+                found.insert(id.to_string());
+            }
+        }
+    }
+    let Ok(tracks) = db.snapshot_tracks() else { return found.into_iter().take(50).collect() };
+    for track in tracks {
+        if found.len() >= 50 { break; }
+        if found.contains(&track.id) { continue; }
+        let path = Path::new(&track.file_path);
+        for ext in ["lrc", "LRC", "txt", "TXT"] {
+            if std::fs::read_to_string(path.with_extension(ext)).is_ok_and(|text| text.to_lowercase().contains(&needle)) {
+                found.insert(track.id.clone());
+                break;
+            }
+        }
+    }
+    found.into_iter().collect()
+}
 
 pub fn get(db: &Db, cache_dir: &Path, track_id: &str, force: bool) -> Option<Lyrics> {
     let brief = db.track_brief(track_id)?;

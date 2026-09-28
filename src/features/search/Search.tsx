@@ -9,14 +9,16 @@ import TrackRow from "../../components/TrackRow"
 import { AlbumCard, ArtistCard, PlaylistCard } from "../../components/cards"
 import EmptyState from "../../components/EmptyState"
 import { cn } from "../../utils/cn"
+import type { Track } from "../../types"
 
-type Filter = "tout" | "titres" | "albums" | "artistes" | "playlists"
+type Filter = "tout" | "titres" | "albums" | "artistes" | "playlists" | "paroles"
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "tout", label: "Tout" },
   { id: "titres", label: "Titres" },
   { id: "albums", label: "Albums" },
   { id: "artistes", label: "Artistes" },
   { id: "playlists", label: "Playlists" },
+  { id: "paroles", label: "Paroles" },
 ]
 const SUGGESTIONS = ["Jazz", "Ambient", "Piano", "Live", "Années 80", "Acoustique"]
 const RECENT_KEY = "aura-recent-search"
@@ -34,6 +36,8 @@ export default function Search() {
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<Filter>("tout")
   const [results, setResults] = useState<SearchResults | null>(null)
+  const [lyricsTracks, setLyricsTracks] = useState<Track[]>([])
+  const [lyricsLoading, setLyricsLoading] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const [recent, setRecent] = useState<string[]>(loadRecent)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -50,13 +54,27 @@ export default function Search() {
       setResults(null)
       return
     }
+    let alive = true
     const t = setTimeout(async () => {
-      const r = await backend.library.search(trimmed)
-      setResults(r)
-      setHighlight(0)
+      try {
+        const r = await backend.library.search(trimmed)
+        if (alive) { setResults(r); setHighlight(0) }
+      } catch { if (alive) setResults(null) }
     }, 180)
-    return () => clearTimeout(t)
+    return () => { alive = false; clearTimeout(t) }
   }, [trimmed])
+
+  useEffect(() => {
+    if (filter !== "paroles" || trimmed.length < 3) { setLyricsTracks([]); setLyricsLoading(false); return }
+    let alive = true
+    setLyricsLoading(true)
+    const timer = setTimeout(() => {
+      backend.library.searchLyrics(trimmed).then((items) => { if (alive) setLyricsTracks(items) })
+        .catch(() => { if (alive) setLyricsTracks([]) })
+        .finally(() => { if (alive) setLyricsLoading(false) })
+    }, 250)
+    return () => { alive = false; clearTimeout(timer) }
+  }, [trimmed, filter])
 
   const commitRecent = useCallback((q: string) => {
     const v = q.trim()
@@ -83,7 +101,7 @@ export default function Search() {
 
   const show = (f: Filter) => filter === "tout" || filter === f
   const tracks = results?.tracks ?? []
-  const visibleTracks = show("titres") ? tracks : []
+  const visibleTracks = filter === "paroles" ? lyricsTracks : show("titres") ? tracks : []
 
   const playTrack = useCallback(
     (id: string) => {
@@ -124,8 +142,8 @@ export default function Search() {
     else navigate({ name: best.kind, id: (best.item as { id: string }).id })
   }
 
-  const hasResults =
-    results && (results.tracks.length || results.albums.length || results.artists.length || results.playlists.length)
+  const hasResults = filter === "paroles" ? lyricsTracks.length > 0 :
+    !!(results && (results.tracks.length || results.albums.length || results.artists.length || results.playlists.length))
 
   return (
     <div className="p-8">
@@ -164,6 +182,9 @@ export default function Search() {
         </div>
       )}
 
+      {trimmed && filter === "paroles" && <p className="mt-3 text-xs text-mid">Recherche hors ligne dans les paroles déjà chargées et les fichiers .lrc/.txt de votre bibliothèque. Saisissez au moins 3 caractères.</p>}
+      {trimmed && filter === "paroles" && lyricsLoading && <p className="mt-8 text-sm text-mid">Recherche dans les paroles…</p>}
+
       {!trimmed && (
         <div className="mt-10 space-y-8">
           {recent.length > 0 && (
@@ -200,7 +221,7 @@ export default function Search() {
         </div>
       )}
 
-      {trimmed && results && !hasResults && (
+      {trimmed && results && !hasResults && !lyricsLoading && (
         <EmptyState
           icon={<SearchIcon size={34} />}
           title="Aucun résultat"
@@ -210,6 +231,7 @@ export default function Search() {
 
       {trimmed && hasResults ? (
         <div className="mt-8 space-y-10">
+          {filter === "paroles" && lyricsTracks.length > 0 && <section><h2 className="mb-3 text-xl font-bold tracking-tight text-hi">Paroles correspondantes</h2><div className="space-y-1">{lyricsTracks.map((t, i) => <TrackRow key={t.id} track={t} index={i + 1} showAlbum onPlay={() => playTrack(t.id)} />)}</div></section>}
           {best?.item && filter === "tout" && (
             <section>
               <h2 className="mb-4 text-xl font-bold tracking-tight text-hi">Meilleur résultat</h2>
@@ -258,33 +280,33 @@ export default function Search() {
             </section>
           )}
 
-          {show("albums") && results.albums.length > 0 && (
+          {show("albums") && !!results?.albums.length && (
             <section>
               <h2 className="mb-4 text-xl font-bold tracking-tight text-hi">Albums</h2>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-6">
-                {results.albums.map((a) => (
+                {results?.albums.map((a) => (
                   <AlbumCard key={a.id} album={a} />
                 ))}
               </div>
             </section>
           )}
 
-          {show("artistes") && results.artists.length > 0 && (
+          {show("artistes") && !!results?.artists.length && (
             <section>
               <h2 className="mb-4 text-xl font-bold tracking-tight text-hi">Artistes</h2>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-6">
-                {results.artists.map((a) => (
+                {results?.artists.map((a) => (
                   <ArtistCard key={a.id} artist={a} />
                 ))}
               </div>
             </section>
           )}
 
-          {show("playlists") && results.playlists.length > 0 && (
+          {show("playlists") && !!results?.playlists.length && (
             <section>
               <h2 className="mb-4 text-xl font-bold tracking-tight text-hi">Playlists</h2>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-6">
-                {results.playlists.map((p) => (
+                {results?.playlists.map((p) => (
                   <PlaylistCard key={p.id} playlist={p} />
                 ))}
               </div>

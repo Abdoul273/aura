@@ -9,6 +9,7 @@ export interface Track {
   title: string
   artist: string
   artistId: string
+  albumArtist: string
   album: string
   albumId: string
   trackNumber: number
@@ -133,6 +134,17 @@ export type LyricsAvailability = "synced" | "approx" | "plain" | "instrumental" 
 
 export type DlStatus = "queued" | "downloading" | "retrying" | "converting" | "tagging" | "lyrics" | "done" | "error" | "canceled"
 
+export interface TagPatch {
+  title: string
+  artist: string
+  album: string
+  albumArtist: string
+  genre: string
+  year: number
+  trackNumber: number
+  discNumber: number
+}
+
 export interface DlJob {
   id: string
   title: string
@@ -232,6 +244,14 @@ export interface LibraryStats {
 
 export type ThemeMode = "dark" | "light"
 export type ReplayGainMode = "off" | "track" | "album"
+export interface SmartView {
+  id: string
+  name: string
+  view: "all" | "unplayed" | "recent" | "hires" | "duplicates"
+  query: string
+  genre: string
+  quality: string
+}
 
 export interface Settings {
   theme: ThemeMode
@@ -247,6 +267,9 @@ export interface Settings {
   gapless: boolean
   replayGain: ReplayGainMode
   musicFolders: string[]
+  smartViews: SmartView[]
+  visualizerMode: "bars" | "circular" | "waves"
+  visualizerColor: "white" | "artwork"
 }
 
 export interface SortSpec {
