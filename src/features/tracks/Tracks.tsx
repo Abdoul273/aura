@@ -5,6 +5,7 @@ import { Play, Shuffle, Heart, ArrowUp, ArrowDown, SlidersHorizontal, Check, Sea
 import type { Track, SortSpec } from "../../types"
 import { backend } from "../../services"
 import CoverArt from "../../components/CoverArt"
+import Select from "../../components/Select"
 import EqualizerBars from "../../components/EqualizerBars"
 import { RowsSkeleton } from "../../components/Skeleton"
 import { useOpenMenu } from "../../components/TrackContextMenu"
@@ -14,6 +15,8 @@ import { useLibrary } from "../../store/libraryStore"
 import { useSettings } from "../../store/settingsStore"
 import { formatTime, formatCount } from "../../utils/format"
 import { cn } from "../../utils/cn"
+
+const QUALITIES = ["Hi-Res", "Lossless", "Lossy"].map((q) => ({ value: q, label: q }))
 
 type ColKey = "index" | "title" | "artist" | "album" | "year" | "genre" | "duration" | "plays" | "fav"
 
@@ -247,11 +250,11 @@ export default function Tracks() {
         </div>
         <div className="flex flex-wrap gap-2">
           <label className="flex min-w-48 flex-1 items-center gap-2 rounded-xl border border-[var(--glass-border)] bg-white/5 px-3"><Search size={16} className="text-lo" /><input value={query} onChange={(e) => { setQuery(e.target.value); setSavedId("") }} placeholder="Filtrer les titres…" aria-label="Filtrer les titres" className="w-full bg-transparent py-2 text-sm text-hi outline-none placeholder:text-lo" /></label>
-          <select value={genre} onChange={(e) => { setGenre(e.target.value); setSavedId("") }} aria-label="Filtrer par genre" className="focus-ring rounded-xl border border-[var(--glass-border)] bg-[var(--bg-1)] px-3 text-sm text-hi"><option value="">Tous les genres</option>{genres.map((g) => <option key={g} value={g}>{g}</option>)}</select>
-          <select value={quality} onChange={(e) => { setQuality(e.target.value); setSavedId("") }} aria-label="Filtrer par qualité" className="focus-ring rounded-xl border border-[var(--glass-border)] bg-[var(--bg-1)] px-3 text-sm text-hi"><option value="">Toutes les qualités</option><option value="Hi-Res">Hi-Res</option><option value="Lossless">Lossless</option><option value="Lossy">Lossy</option></select>
+          <Select value={genre} onChange={(v) => { setGenre(v); setSavedId("") }} ariaLabel="Filtrer par genre" placeholder="Tous les genres" options={genres.map((g) => ({ value: g, label: g }))} />
+          <Select value={quality} onChange={(v) => { setQuality(v); setSavedId("") }} ariaLabel="Filtrer par qualité" placeholder="Toutes les qualités" options={QUALITIES} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select value={savedId} onChange={(e) => selectSaved(e.target.value)} aria-label="Vues enregistrées" className="focus-ring rounded-xl border border-[var(--glass-border)] bg-[var(--bg-1)] px-3 py-2 text-xs text-hi"><option value="">Vues enregistrées</option>{(settings?.smartViews ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
+          <Select size="sm" value={savedId} onChange={selectSaved} ariaLabel="Vues enregistrées" placeholder="Vues enregistrées" options={(settings?.smartViews ?? []).map((v) => ({ value: v.id, label: v.name }))} />
           {savedId && <button onClick={() => { void update({ smartViews: (settings?.smartViews ?? []).filter((v) => v.id !== savedId) }); setSavedId("") }} aria-label="Supprimer la vue enregistrée" className="focus-ring rounded-xl border border-[var(--glass-border)] p-2 text-mid hover:text-red-400"><Trash2 size={15} /></button>}
           {savingView ? <form onSubmit={(e) => { e.preventDefault(); saveView() }} className="flex items-center gap-2"><input autoFocus value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Nom de la vue" aria-label="Nom de la vue" className="focus-ring rounded-xl border border-[var(--glass-border)] bg-white/5 px-3 py-2 text-xs text-hi outline-none" /><button type="submit" className="rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white">Enregistrer</button><button type="button" onClick={() => setSavingView(false)} className="text-xs text-mid">Annuler</button></form> : <button onClick={() => setSavingView(true)} className="focus-ring flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-3 py-2 text-xs text-mid hover:text-hi"><BookmarkPlus size={15} /> Enregistrer ces filtres</button>}
         </div>

@@ -5,6 +5,7 @@ import type { Album } from "../../types"
 import { AlbumCard } from "../../components/cards"
 import { CardGridSkeleton } from "../../components/Skeleton"
 import EmptyState from "../../components/EmptyState"
+import Select from "../../components/Select"
 import { useLibrary } from "../../store/libraryStore"
 import { cn } from "../../utils/cn"
 import { formatCount } from "../../utils/format"
@@ -23,28 +24,6 @@ const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("")
 function firstLetter(s: string): string {
   const c = s.trim().charAt(0).toUpperCase()
   return /[A-Z]/.test(c) ? c : "#"
-}
-
-function Select<T extends string>({ value, onChange, options, placeholder }: {
-  value: T
-  onChange: (v: T) => void
-  options: { value: T; label: string }[]
-  placeholder?: string
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      className="glass focus-ring rounded-full px-4 py-2 text-sm font-medium text-hi outline-none"
-    >
-      {placeholder && <option value="">{placeholder}</option>}
-      {options.map((o) => (
-        <option key={o.value} value={o.value} className="bg-neutral-900">
-          {o.label}
-        </option>
-      ))}
-    </select>
-  )
 }
 
 export default function Albums() {
@@ -104,11 +83,11 @@ export default function Albums() {
       </header>
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
-        <Select value={sortKey} onChange={setSortKey} options={SORTS.map((s) => ({ value: s.key, label: s.label }))} />
-        <Select value={fArtist} onChange={setFArtist} placeholder="Tous les artistes" options={artists.map((a) => ({ value: a, label: a }))} />
-        <Select value={fYear} onChange={setFYear} placeholder="Toutes les années" options={years.map((y) => ({ value: y, label: y }))} />
-        <Select value={fGenre} onChange={setFGenre} placeholder="Tous les genres" options={genres.map((g) => ({ value: g, label: g }))} />
-        <Select value={fQuality} onChange={setFQuality} placeholder="Tous les formats" options={qualities.map((q) => ({ value: q, label: q }))} />
+        <Select className="rounded-full" value={sortKey} onChange={setSortKey} options={SORTS.map((s) => ({ value: s.key, label: s.label }))} />
+        <Select className="rounded-full" value={fArtist} onChange={setFArtist} placeholder="Tous les artistes" options={artists.map((a) => ({ value: a, label: a }))} />
+        <Select className="rounded-full" value={fYear} onChange={setFYear} placeholder="Toutes les années" options={years.map((y) => ({ value: y, label: y }))} />
+        <Select className="rounded-full" value={fGenre} onChange={setFGenre} placeholder="Tous les genres" options={genres.map((g) => ({ value: g, label: g }))} />
+        <Select className="rounded-full" value={fQuality} onChange={setFQuality} placeholder="Tous les formats" options={qualities.map((q) => ({ value: q, label: q }))} />
       </div>
 
       {!loaded ? (

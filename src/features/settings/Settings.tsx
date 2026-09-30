@@ -14,6 +14,7 @@ import {
 import type { AudioDevice, ReplayGainMode, Settings as AppSettings } from "../../types"
 import { backend } from "../../services"
 import Modal from "../../components/Modal"
+import Select from "../../components/Select"
 import { useSettings } from "../../store/settingsStore"
 import { useLibrary } from "../../store/libraryStore"
 import { cn } from "../../utils/cn"
@@ -305,17 +306,12 @@ function PlaybackTab({ s, update }: { s: AppSettings; update: (p: Partial<AppSet
       </Row>
 
       <Row label="Périphérique de sortie">
-        <select
+        <Select
+          ariaLabel="Périphérique de sortie"
           value={devices.find((d) => d.active)?.id ?? ""}
-          onChange={(e) => void selectDevice(e.target.value)}
-          className="focus-ring rounded-xl border border-[var(--glass-border)] bg-white/5 px-3 py-2 text-sm text-hi outline-none"
-        >
-          {devices.map((d) => (
-            <option key={d.id} value={d.id} className="bg-neutral-900 text-hi">
-              {d.name}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => void selectDevice(v)}
+          options={devices.map((d) => ({ value: d.id, label: d.name }))}
+        />
       </Row>
     </div>
   )
